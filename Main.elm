@@ -46,7 +46,7 @@ type
 
 
 init =
-    ( { clips = [ (Clip 0 "The star spangled banner" 0 120 10) ]
+    ( { sources = [ Source "The star spangled banner" [ (Clip 0 0 120 10) ] ]
       , drag = Nothing
       , windowSize = ( 100, 100 )
       , viewboxWidth = 200.0
@@ -56,8 +56,13 @@ init =
     )
 
 
+allClips : Model -> List Clip
+allClips model =
+    List.concatMap (.clips) model.sources
+
+
 type alias Model =
-    { clips : List Clip
+    { sources : List Source
     , drag : Maybe Drag
     , windowSize : ( Int, Int )
     , viewboxWidth : Float
@@ -65,9 +70,14 @@ type alias Model =
     }
 
 
+type alias Source =
+    { url : String
+    , clips : List Clip
+    }
+
+
 type alias Clip =
     { id : Int
-    , source : String
     , sourceStart : Float
     , length : Float
     , start : Float
@@ -109,21 +119,31 @@ applyDrag model =
             model
 
         Just drag ->
-            let
-                newClips =
-                    List.map
+            { model
+                | sources =
+                    updateClips
                         (\clip ->
                             if clip.id == drag.clipId then
                                 clipWithDrag model clip
                             else
                                 clip
                         )
-                        model.clips
-            in
-                { model
-                    | clips = newClips
-                    , drag = Nothing
-                }
+                        model.sources
+                , drag = Nothing
+            }
+
+
+updateClips : (Clip -> Clip) -> List Source -> List Source
+updateClips update sources =
+    List.map
+        (\source ->
+            { source
+                | clips =
+                    List.map update
+                        source.clips
+            }
+        )
+        sources
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -167,7 +187,7 @@ view model =
         , y "0"
         , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
         ]
-        ((List.map clipView model.clips) ++ (dragGuides model))
+        ((List.map clipView (allClips model)) ++ (dragGuides model))
 
 
 dragGuides : Model -> List (Svg Msg)
@@ -177,7 +197,7 @@ dragGuides model =
             []
 
         Just drag ->
-            model.clips
+            (allClips model)
                 |> List.filter (\clip -> clip.id == drag.clipId)
                 |> List.map (clipWithDrag model)
                 |> List.map shadow
