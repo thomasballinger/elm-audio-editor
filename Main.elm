@@ -7,7 +7,8 @@ import Svg.Attributes exposing (..)
 import Mouse exposing (Position)
 import Time
 import Html.Events exposing (onMouseDown)
-import Json.Decode as Json exposing ((:=))
+import Json.Decode as Json
+import Window
 
 
 main : Program Never
@@ -18,16 +19,18 @@ main =
         , update = update
         , subscriptions =
             \model ->
-                case model.drag of
-                    --Nothing -> AnimationFrame.times Tick
-                    Nothing ->
-                        Sub.none
+                Sub.batch
+                    ([ Window.resizes WinSize ]
+                        ++ case model.drag of
+                            --Nothing -> AnimationFrame.times Tick
+                            Nothing ->
+                                []
 
-                    Just drag ->
-                        Sub.batch
-                            [ Mouse.moves (DragAt drag.clipId)
-                            , Mouse.ups (DragEnd drag.clipId)
-                            ]
+                            Just drag ->
+                                [ Mouse.moves (DragAt drag.clipId)
+                                , Mouse.ups (DragEnd drag.clipId)
+                                ]
+                    )
         }
 
 
@@ -37,11 +40,15 @@ type
     = DragStart Int Position
     | DragAt Int Position
     | DragEnd Int Position
+    | WinSize Window.Size
 
 
 init =
     ( { clips = [ (Clip 0 "The star spangled banner" 0 120 10) ]
       , drag = Nothing
+      , windowSize = ( 100, 100 )
+      , viewboxWidth = 200.0
+      , viewboxHeight = 200.0
       }
     , Cmd.none
     )
@@ -50,6 +57,9 @@ init =
 type alias Model =
     { clips : List Clip
     , drag : Maybe Drag
+    , windowSize : ( Int, Int )
+    , viewboxWidth : Float
+    , viewboxHeight : Float
     }
 
 
@@ -74,11 +84,21 @@ applyDrag model =
     case model.drag of
         Just drag ->
             let
+                ( winWidth, winHeight ) =
+                    model.windowSize
+
+                widthRatio =
+                    model.viewboxWidth
+                        / (toFloat winWidth)
+
+                heightRatio =
+                    model.viewboxHeight / (toFloat winHeight)
+
                 newClips =
                     List.map
                         (\clip ->
                             if clip.id == drag.clipId then
-                                { clip | start = clip.start + (toFloat drag.current.x) - (toFloat drag.start.x) }
+                                { clip | start = clip.start + ((toFloat drag.current.x) - (toFloat drag.start.x)) * widthRatio }
                             else
                                 clip
                         )
@@ -99,7 +119,7 @@ update msg model =
 
 
 updateHelp : Msg -> Model -> Model
-updateHelp msg ({ drag } as model) =
+updateHelp msg model =
     case msg of
         DragStart id xy ->
             { model | drag = Just (Drag id xy xy) }
@@ -110,6 +130,9 @@ updateHelp msg ({ drag } as model) =
         --TODO this update should be based on the current zoom
         DragEnd id _ ->
             applyDrag model
+
+        WinSize size ->
+            { model | windowSize = ( size.width, size.height ) }
 
 
 
@@ -134,7 +157,7 @@ view model =
         [ version "1.1"
         , x "0"
         , y "0"
-        , viewBox "0 0 200 200"
+        , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
         ]
         (List.map clipView
             model.clips
