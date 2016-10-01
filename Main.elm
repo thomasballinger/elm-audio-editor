@@ -79,8 +79,8 @@ type alias Drag =
     }
 
 
-applyDrag : Model -> Model
-applyDrag model =
+clipWithDrag : Model -> Clip -> Clip
+clipWithDrag model clip =
     case model.drag of
         Just drag ->
             let
@@ -93,12 +93,26 @@ applyDrag model =
 
                 heightRatio =
                     model.viewboxHeight / (toFloat winHeight)
+            in
+                { clip | start = clip.start + ((toFloat drag.current.x) - (toFloat drag.start.x)) * widthRatio }
 
+        Nothing ->
+            clip
+
+
+applyDrag : Model -> Model
+applyDrag model =
+    case model.drag of
+        Nothing ->
+            model
+
+        Just drag ->
+            let
                 newClips =
                     List.map
                         (\clip ->
                             if clip.id == drag.clipId then
-                                { clip | start = clip.start + ((toFloat drag.current.x) - (toFloat drag.start.x)) * widthRatio }
+                                clipWithDrag model clip
                             else
                                 clip
                         )
@@ -108,9 +122,6 @@ applyDrag model =
                     | clips = newClips
                     , drag = Nothing
                 }
-
-        Nothing ->
-            model
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -140,16 +151,8 @@ updateHelp msg model =
 
 
 clipView : Clip -> Svg Msg
-clipView clip =
-    rect
-        [ fill "#7FD13B"
-        , x (toString clip.start)
-        , y "107.392"
-        , width (toString clip.length)
-        , height "10"
-        , Html.Events.on "mousedown" (Json.map (DragStart clip.id) Mouse.position)
-        ]
-        []
+clipView =
+    clipRectOfOpacityColor "1.0" "green"
 
 
 view model =
@@ -159,9 +162,44 @@ view model =
         , y "0"
         , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
         ]
-        (List.map clipView
+        ((List.map clipView
             model.clips
+         )
+            ++ (dragGuides model)
         )
+
+
+dragGuides : Model -> List (Svg Msg)
+dragGuides model =
+    case model.drag of
+        Nothing ->
+            []
+
+        Just drag ->
+            model.clips
+                |> List.filter (\clip -> clip.id == drag.clipId)
+                |> List.map (clipWithDrag model)
+                |> List.map shadow
+
+
+clipRectOfOpacityColor : String -> String -> Clip -> Svg Msg
+clipRectOfOpacityColor o c clip =
+    (rect
+        [ fill c
+        , opacity o
+        , x (toString clip.start)
+        , y "107.392"
+        , width (toString clip.length)
+        , height "10"
+        , Html.Events.on "mousedown" (Json.map (DragStart clip.id) Mouse.position)
+        ]
+        []
+    )
+
+
+shadow : Clip -> Svg Msg
+shadow =
+    clipRectOfOpacityColor "0.5" "gray"
 
 
 nop =
