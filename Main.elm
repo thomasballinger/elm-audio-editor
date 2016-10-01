@@ -9,6 +9,7 @@ import Time
 import Html.Events exposing (onMouseDown)
 import Json.Decode as Json
 import Window
+import Task
 
 
 main : Program Never
@@ -41,6 +42,7 @@ type
     | DragAt Int Position
     | DragEnd Int Position
     | WinSize Window.Size
+    | NoOp
 
 
 init =
@@ -50,7 +52,7 @@ init =
       , viewboxWidth = 200.0
       , viewboxHeight = 200.0
       }
-    , Cmd.none
+    , Task.perform (\_ -> NoOp) WinSize Window.size
     )
 
 
@@ -145,6 +147,9 @@ updateHelp msg model =
         WinSize size ->
             { model | windowSize = ( size.width, size.height ) }
 
+        NoOp ->
+            model
+
 
 
 -- View
@@ -162,11 +167,7 @@ view model =
         , y "0"
         , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
         ]
-        ((List.map clipView
-            model.clips
-         )
-            ++ (dragGuides model)
-        )
+        ((List.map clipView model.clips) ++ (dragGuides model))
 
 
 dragGuides : Model -> List (Svg Msg)
