@@ -46,7 +46,7 @@ type
 
 
 init =
-    ( { sources = [ Source "The star spangled banner" [ (Clip 0 0 120 10) ] ]
+    ( { sources = [ Source 0 "The star spangled banner" 120.0 [ (Clip 1 0 20 10) ] ]
       , drag = Nothing
       , windowSize = ( 100, 100 )
       , viewboxWidth = 200.0
@@ -71,7 +71,9 @@ type alias Model =
 
 
 type alias Source =
-    { url : String
+    { id : Int
+    , url : String
+    , length : Float
     , clips : List Clip
     }
 
@@ -85,10 +87,39 @@ type alias Clip =
 
 
 type alias Drag =
-    { clipId : Int
+    { clipId :
+        Int
+        --TODO change this to id or something, it could be a clip or a source
     , start : Position
     , current : Position
     }
+
+
+newClipsFromDrag : Model -> Source -> List Clip
+newClipsFromDrag model source =
+    case model.drag of
+        Nothing ->
+            []
+
+        Just drag ->
+            let
+                ( winWidth, winHeight ) =
+                    model.windowSize
+
+                widthRatio =
+                    model.viewboxWidth
+                        / (toFloat winWidth)
+
+                heightRatio =
+                    model.viewboxHeight / (toFloat winHeight)
+
+                end =
+                    (Basics.max (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
+
+                start =
+                    (Basics.min (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
+            in
+                [ (Clip (nextId model) start (end - start) start) ]
 
 
 clipWithDrag : Model -> Clip -> Clip
@@ -121,16 +152,42 @@ applyDrag model =
         Just drag ->
             { model
                 | sources =
-                    updateClips
-                        (\clip ->
-                            if clip.id == drag.clipId then
-                                clipWithDrag model clip
-                            else
-                                clip
-                        )
-                        model.sources
+                    model.sources
+                        |> updateClips
+                            (\clip ->
+                                if clip.id == drag.clipId then
+                                    clipWithDrag model clip
+                                else
+                                    clip
+                            )
+                        |> List.map
+                            (\source ->
+                                if source.id == drag.clipId then
+                                    { source
+                                        | clips =
+                                            List.append (newClipsFromDrag model source)
+                                                source.clips
+                                    }
+                                else
+                                    source
+                            )
                 , drag = Nothing
             }
+
+
+nextId : Model -> Int
+nextId model =
+    let
+        ids =
+            (List.map (.id) model.sources)
+                ++ (List.concatMap (\source -> List.map (.id) source.clips) model.sources)
+    in
+        case List.maximum (ids) of
+            Nothing ->
+                0
+
+            Just id ->
+                id + 1
 
 
 updateClips : (Clip -> Clip) -> List Source -> List Source
@@ -177,7 +234,7 @@ updateHelp msg model =
 
 clipView : Clip -> Svg Msg
 clipView =
-    clipRectOfOpacityColor "1.0" "green"
+    clipRectOfOpacityColor "0.7" "green"
 
 
 view model =
@@ -187,7 +244,7 @@ view model =
         , y "0"
         , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
         ]
-        ((List.map clipView (allClips model)) ++ (dragGuides model))
+        ((List.map sourceView model.sources) ++ (List.map clipView (allClips model)) ++ (dragGuides model))
 
 
 dragGuides : Model -> List (Svg Msg)
@@ -197,10 +254,31 @@ dragGuides model =
             []
 
         Just drag ->
-            (allClips model)
+            (((allClips model)
                 |> List.filter (\clip -> clip.id == drag.clipId)
                 |> List.map (clipWithDrag model)
                 |> List.map shadow
+             )
+                ++ (model.sources
+                        |> List.filter (\source -> source.id == drag.clipId)
+                        |> List.concatMap (newClipsFromDrag model)
+                        |> List.map shadow
+                   )
+            )
+
+
+sourceView : Source -> Svg Msg
+sourceView source =
+    (rect
+        [ fill "blue"
+        , x "0"
+        , y "20"
+        , width (toString source.length)
+        , height "10"
+        , Html.Events.on "mousedown" (Json.map (DragStart source.id) Mouse.position)
+        ]
+        []
+    )
 
 
 clipRectOfOpacityColor : String -> String -> Clip -> Svg Msg
@@ -209,7 +287,7 @@ clipRectOfOpacityColor o c clip =
         [ fill c
         , opacity o
         , x (toString clip.start)
-        , y "107.392"
+        , y "50"
         , width (toString clip.length)
         , height "10"
         , Html.Events.on "mousedown" (Json.map (DragStart clip.id) Mouse.position)
