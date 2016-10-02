@@ -7,6 +7,8 @@ import Svg.Attributes exposing (..)
 import Mouse exposing (Position)
 import Time
 import Html.Events exposing (onMouseDown)
+import Html.Attributes exposing (src)
+import Html
 import Json.Decode as Json
 import Window
 import Task
@@ -43,10 +45,12 @@ type
     | DragEnd Int Position
     | WinSize Window.Size
     | NoOp
+    | AudioLengthKnown String Float
 
 
 init =
-    ( { sources = [ Source 0 "The star spangled banner" 120.0 [ (Clip 1 0 20 10) ] ]
+    ( { sources = []
+      , sourceUrls = [ "audio1.ogg", "audio2.ogg", "audio3.ogg" ]
       , drag = Nothing
       , windowSize = ( 100, 100 )
       , viewboxWidth = 200.0
@@ -63,6 +67,7 @@ allClips model =
 
 type alias Model =
     { sources : List Source
+    , sourceUrls : List String
     , drag : Maybe Drag
     , windowSize : ( Int, Int )
     , viewboxWidth : Float
@@ -227,6 +232,9 @@ updateHelp msg model =
         NoOp ->
             model
 
+        AudioLengthKnown url length ->
+            { model | sources = (Source (nextId model) url length []) :: model.sources }
+
 
 
 -- View
@@ -238,13 +246,34 @@ clipView =
 
 
 view model =
-    svg
-        [ version "1.1"
-        , x "0"
-        , y "0"
-        , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
+    Html.div []
+        ([ svg
+            [ version "1.1"
+            , x "0"
+            , y "0"
+            , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
+            ]
+            ((List.indexedMap sourceView model.sources) ++ (List.map clipView (allClips model)) ++ (dragGuides model))
+         ]
+            ++ List.map audioEmbed model.sourceUrls
+        )
+
+
+targetDuration : Json.Decoder Float
+targetDuration =
+    Json.at [ "target", "duration" ] Json.float
+
+
+onLoadedMetadata msg =
+    Html.Events.on "loadedmetadata" (Json.map msg targetDuration)
+
+
+audioEmbed url =
+    Html.audio
+        [ src url
+        , onLoadedMetadata (AudioLengthKnown url)
         ]
-        ((List.map sourceView model.sources) ++ (List.map clipView (allClips model)) ++ (dragGuides model))
+        []
 
 
 dragGuides : Model -> List (Svg Msg)
@@ -267,17 +296,28 @@ dragGuides model =
             )
 
 
-sourceView : Source -> Svg Msg
-sourceView source =
-    (rect
-        [ fill "blue"
-        , x "0"
-        , y "20"
-        , width (toString source.length)
-        , height "10"
-        , Html.Events.on "mousedown" (Json.map (DragStart source.id) Mouse.position)
+sourceView : Int -> Source -> Svg Msg
+sourceView i source =
+    (g []
+        [ (rect
+            [ fill "blue"
+            , x "0"
+            , y (toString (10 + 15 * i))
+            , width (toString source.length)
+            , height "10"
+            , Html.Events.on "mousedown" (Json.map (DragStart source.id) Mouse.position)
+            ]
+            []
+          )
+        , (text'
+            [ x "5"
+            , y (toString (15 + 15 * i))
+            , fontFamily "Verdana"
+            , fontSize "4"
+            ]
+            [ text source.url ]
+          )
         ]
-        []
     )
 
 
