@@ -47,6 +47,8 @@ type
     | WinSize Window.Size
     | NoOp
     | AudioLengthKnown String Float
+    | Schedule Int
+    | UnSchedule Int
 
 
 init =
@@ -95,6 +97,7 @@ type alias Clip =
     , sourceStart : Float
     , length : Float
     , start : Float
+    , uses : List Int
     }
 
 
@@ -131,7 +134,7 @@ newClipsFromDrag model source =
                 start =
                     (Basics.min (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
             in
-                [ (Clip (nextId model) start (end - start) start) ]
+                [ (Clip (nextId model) start (end - start) start []) ]
 
 
 clipWithDrag : Model -> Clip -> Clip
@@ -263,13 +266,64 @@ updateHelp msg model =
                         :: model.sources
             }
 
+        Schedule clipId ->
+            scheduleClipAtEnd clipId model
+
+        UnSchedule index ->
+            unscheduleClip index model
+
+
+scheduledUses : Model -> List ( Int, Clip, Source )
+scheduledUses model =
+    allClipsWithSources model
+        |> List.concatMap (\( clip, source ) -> (List.map (\use -> ( use, clip, source )) clip.uses))
+        |> List.sortBy (\( use, clip, source ) -> use)
+
+
+unscheduledClips : Model -> List ( Clip, Source )
+unscheduledClips model =
+    allClipsWithSources model
+        |> List.filter (\( clip, source ) -> (List.length clip.uses) == 0)
+
+
+unscheduleClip : Int -> Model -> Model
+unscheduleClip index model =
+    model
+
+
+scheduleClipAtEnd : Int -> Model -> Model
+scheduleClipAtEnd clipId model =
+    { model
+        | sources =
+            List.map
+                (\source ->
+                    { source
+                        | clips =
+                            List.map
+                                (\clip ->
+                                    if clip.id == clipId then
+                                        { clip | uses = ((nextScheduledId model) :: clip.uses) }
+                                    else
+                                        clip
+                                )
+                                source.clips
+                    }
+                )
+                model.sources
+    }
+
+
+nextScheduledId : Model -> Int
+nextScheduledId model =
+    (Maybe.withDefault 0 (List.maximum (List.concatMap .uses (allClips model)))) + 1
+
 
 
 -- Maybe each clip knows where it appears
 -- Sources have Clips, Clips have Uses - nah how about they only have one use? Lists are easier to deal with I guess.
 -- But the common use is that clips have 1 or 0 uses.
 -- Layout: Sources with clips, then list of all unused clips, then layout of used clips.
--- View
+-- Vie
 
 
 unusedClipRect : Float -> ( Clip, Source ) -> Svg Msg
@@ -279,8 +333,9 @@ unusedClipRect yVal ( clip, source ) =
             [ fill "green"
             , x "0"
             , y (toString yVal)
-            , width (toString clip.length)
+            , width (toString (clip.length + 20))
             , height "10"
+            , Html.Events.onClick (Schedule clip.id)
             ]
             []
           )
@@ -306,17 +361,38 @@ unusedClipRect yVal ( clip, source ) =
     )
 
 
+usedClipRect : Float -> ( Int, Clip, Source ) -> Svg Msg
+usedClipRect yVal ( index, clip, source ) =
+    (rect
+        [ fill "green"
+        , x (toString (index * 20))
+        , y (toString (index * 20 + yVal))
+        , width (toString (clip.length))
+        , height "10"
+        , Html.Events.onClick (UnSchedule index)
+        ]
+        []
+    )
+
+
 floatToTime : Float -> String
 floatToTime t =
     (toString ((round t) // 60)) ++ ":" ++ (String.padLeft 2 '0' (toString ((round t) % 60))) ++ "." ++ (toString (round (t * 100) % 100))
 
 
-clipsView : Float -> List ( Clip, Source ) -> Svg Msg
-clipsView yVal clipSourcePairs =
+unusedClipsView : Float -> List ( Clip, Source ) -> Svg Msg
+unusedClipsView yVal clipSourcePairs =
     (g []
         (List.indexedMap (\i ( clip, source ) -> (unusedClipRect (yVal + (toFloat i * 15)) ( clip, source )))
             clipSourcePairs
         )
+    )
+
+
+scheduledClipsView : Float -> List ( Int, Clip, Source ) -> Svg Msg
+scheduledClipsView yVal uses =
+    (g []
+        (List.map (usedClipRect yVal) uses)
     )
 
 
@@ -330,7 +406,11 @@ view model =
             ]
             ((List.map sourceView model.sources)
                 ++ (dragGuides model)
-                ++ [ (clipsView (toFloat (List.length model.sources) * 15 + 15) (allClipsWithSources model)) ]
+                ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
+                ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
+                        (scheduledUses model)
+                     )
+                   ]
             )
          ]
             ++ List.map audioEmbed model.sourceUrls
