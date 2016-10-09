@@ -53,7 +53,7 @@ init =
       , sourceUrls = [ "audio1.ogg", "audio2.ogg", "audio3.ogg" ]
       , drag = Nothing
       , windowSize = ( 100, 100 )
-      , viewboxWidth = 200.0
+      , viewboxWidth = 400.0
       , viewboxHeight = 200.0
       }
     , Task.perform (\_ -> NoOp) WinSize Window.size
@@ -63,6 +63,11 @@ init =
 allClips : Model -> List Clip
 allClips model =
     List.concatMap (.clips) model.sources
+
+
+allClipsWithSources : Model -> List ( Clip, Source )
+allClipsWithSources model =
+    List.concatMap (\source -> List.map (\clip -> ( clip, source )) source.clips) model.sources
 
 
 type alias Model =
@@ -80,6 +85,7 @@ type alias Source =
     , url : String
     , length : Float
     , clips : List Clip
+    , yPos : Float
     }
 
 
@@ -233,7 +239,11 @@ updateHelp msg model =
             model
 
         AudioLengthKnown url length ->
-            { model | sources = (Source (nextId model) url length []) :: model.sources }
+            { model
+                | sources =
+                    (Source (nextId model) url length [] (toFloat (List.length model.sources) * 15 + 10))
+                        :: model.sources
+            }
 
 
 
@@ -242,7 +252,7 @@ updateHelp msg model =
 
 clipView : Clip -> Svg Msg
 clipView =
-    clipRectOfOpacityColor "0.7" "green"
+    clipRectOfOpacityColorY "0.7" "green" 50
 
 
 view model =
@@ -253,7 +263,10 @@ view model =
             , y "0"
             , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
             ]
-            ((List.indexedMap sourceView model.sources) ++ (List.map clipView (allClips model)) ++ (dragGuides model))
+            ((List.map sourceView model.sources)
+                ++ --(List.map clipView (allClips model)) ++
+                   (dragGuides model)
+            )
          ]
             ++ List.map audioEmbed model.sourceUrls
         )
@@ -283,51 +296,53 @@ dragGuides model =
             []
 
         Just drag ->
-            (((allClips model)
-                |> List.filter (\clip -> clip.id == drag.clipId)
-                |> List.map (clipWithDrag model)
-                |> List.map shadow
+            (((allClipsWithSources model)
+                |> List.filter (\( clip, source ) -> clip.id == drag.clipId)
+                |> List.map (\( clip, source ) -> ( clipWithDrag model clip, source ))
+                |> List.map (\( clip, source ) -> shadow source.yPos clip)
              )
                 ++ (model.sources
                         |> List.filter (\source -> source.id == drag.clipId)
-                        |> List.concatMap (newClipsFromDrag model)
-                        |> List.map shadow
+                        |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
+                        |> List.map (\( clip, source ) -> (shadow source.yPos clip))
                    )
             )
 
 
-sourceView : Int -> Source -> Svg Msg
-sourceView i source =
+sourceView : Source -> Svg Msg
+sourceView source =
     (g []
-        [ (rect
-            [ fill "blue"
-            , x "0"
-            , y (toString (10 + 15 * i))
-            , width (toString source.length)
-            , height "10"
-            , Html.Events.on "mousedown" (Json.map (DragStart source.id) Mouse.position)
-            ]
-            []
-          )
-        , (text'
-            [ x "5"
-            , y (toString (15 + 15 * i))
-            , fontFamily "Verdana"
-            , fontSize "4"
-            ]
-            [ text source.url ]
-          )
-        ]
+        ([ (rect
+                [ fill "blue"
+                , x "0"
+                , y (toString source.yPos)
+                , width (toString source.length)
+                , height "10"
+                , Html.Events.on "mousedown" (Json.map (DragStart source.id) Mouse.position)
+                ]
+                []
+           )
+         , (text'
+                [ x "2"
+                , y (toString (source.yPos + 5))
+                , fontFamily "Verdana"
+                , fontSize "4"
+                ]
+                [ text source.url ]
+           )
+         ]
+            ++ (List.map (clipRectOfOpacityColorY "1" "green" source.yPos) source.clips)
+        )
     )
 
 
-clipRectOfOpacityColor : String -> String -> Clip -> Svg Msg
-clipRectOfOpacityColor o c clip =
+clipRectOfOpacityColorY : String -> String -> Float -> Clip -> Svg Msg
+clipRectOfOpacityColorY o c yVal clip =
     (rect
         [ fill c
         , opacity o
         , x (toString clip.start)
-        , y "50"
+        , y (toString yVal)
         , width (toString clip.length)
         , height "10"
         , Html.Events.on "mousedown" (Json.map (DragStart clip.id) Mouse.position)
@@ -336,9 +351,9 @@ clipRectOfOpacityColor o c clip =
     )
 
 
-shadow : Clip -> Svg Msg
+shadow : Float -> Clip -> Svg Msg
 shadow =
-    clipRectOfOpacityColor "0.5" "gray"
+    clipRectOfOpacityColorY "0.5" "gray"
 
 
 nop =
