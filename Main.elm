@@ -219,6 +219,17 @@ update msg model =
     ( (updateHelp msg model), Cmd.none )
 
 
+
+--TODO different kinds of drags
+
+
+type DragType
+    = NewClip Int
+    | MoveClip Int
+    | ResizeClipLeft Int
+    | ResizeClipRight Int
+
+
 updateHelp : Msg -> Model -> Model
 updateHelp msg model =
     case msg of
@@ -247,12 +258,46 @@ updateHelp msg model =
 
 
 
+-- Maybe each clip knows where it appears
+-- Sources have Clips, Clips have Uses - nah how about they only have one use? Lists are easier to deal with I guess.
+-- But the common use is that clips have 1 or 0 uses.
+-- Layout: Sources with clips, then list of all unused clips, then layout of used clips.
 -- View
 
 
-clipView : Clip -> Svg Msg
-clipView =
-    clipRectOfOpacityColorY "0.7" "green" 50
+unusedClipRect : Float -> ( Clip, Source ) -> Svg Msg
+unusedClipRect yVal ( clip, source ) =
+    (g []
+        [ (rect
+            [ fill "green"
+            , x "0"
+            , y (toString yVal)
+            , width (toString clip.length)
+            , height "10"
+            ]
+            []
+          )
+        , (line
+            [ x1 (toString clip.length)
+            , y1 (toString (yVal + 5))
+            , x2 (toString clip.start)
+            , y2 (toString (source.yPos + 5))
+            , strokeWidth "0.2"
+            , stroke "black"
+            ]
+            []
+          )
+        ]
+    )
+
+
+clipsView : Float -> List ( Clip, Source ) -> Svg Msg
+clipsView yVal clipSourcePairs =
+    (g []
+        (List.indexedMap (\i ( clip, source ) -> (unusedClipRect (yVal + (toFloat i * 15)) ( clip, source )))
+            clipSourcePairs
+        )
+    )
 
 
 view model =
@@ -264,8 +309,8 @@ view model =
             , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
             ]
             ((List.map sourceView model.sources)
-                ++ --(List.map clipView (allClips model)) ++
-                   (dragGuides model)
+                ++ (dragGuides model)
+                ++ [ (clipsView (toFloat (List.length model.sources) * 15 + 15) (allClipsWithSources model)) ]
             )
          ]
             ++ List.map audioEmbed model.sourceUrls
