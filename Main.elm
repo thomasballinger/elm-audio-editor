@@ -12,6 +12,7 @@ import Html
 import Json.Decode as Json
 import Window
 import Task
+import String
 
 
 main : Program Never
@@ -154,36 +155,34 @@ clipWithDrag model clip =
             clip
 
 
-applyDrag : Model -> Model
-applyDrag model =
-    case model.drag of
-        Nothing ->
-            model
-
-        Just drag ->
-            { model
-                | sources =
-                    model.sources
-                        |> updateClips
-                            (\clip ->
-                                if clip.id == drag.clipId then
-                                    clipWithDrag model clip
-                                else
-                                    clip
-                            )
-                        |> List.map
-                            (\source ->
-                                if source.id == drag.clipId then
-                                    { source
-                                        | clips =
-                                            List.append (newClipsFromDrag model source)
-                                                source.clips
-                                    }
-                                else
-                                    source
-                            )
-                , drag = Nothing
-            }
+applyDrag : Model -> Drag -> Model
+applyDrag model drag =
+    if drag.start == drag.current then
+        { model | drag = Nothing }
+    else
+        { model
+            | sources =
+                model.sources
+                    |> updateClips
+                        (\clip ->
+                            if clip.id == drag.clipId then
+                                clipWithDrag model clip
+                            else
+                                clip
+                        )
+                    |> List.map
+                        (\source ->
+                            if source.id == drag.clipId then
+                                { source
+                                    | clips =
+                                        List.append (newClipsFromDrag model source)
+                                            source.clips
+                                }
+                            else
+                                source
+                        )
+            , drag = Nothing
+        }
 
 
 nextId : Model -> Int
@@ -241,7 +240,15 @@ updateHelp msg model =
 
         --TODO this update should be based on the current zoom
         DragEnd id _ ->
-            applyDrag model
+            case model.drag of
+                Nothing ->
+                    model
+
+                Just drag ->
+                    if drag.start == drag.current then
+                        { model | drag = Nothing }
+                    else
+                        applyDrag model drag
 
         WinSize size ->
             { model | windowSize = ( size.width, size.height ) }
@@ -278,17 +285,30 @@ unusedClipRect yVal ( clip, source ) =
             []
           )
         , (line
-            [ x1 (toString clip.length)
+            [ x1 (toString (clip.length / 2))
             , y1 (toString (yVal + 5))
-            , x2 (toString clip.start)
+            , x2 (toString (clip.start + clip.length / 2))
             , y2 (toString (source.yPos + 5))
             , strokeWidth "0.2"
             , stroke "black"
             ]
             []
           )
+        , (text'
+            [ x (toString (clip.length + 2))
+            , y (toString (yVal + 6))
+            , fontFamily "Verdana"
+            , fontSize "4"
+            ]
+            [ text (source.url ++ "   " ++ (floatToTime clip.length)) ]
+          )
         ]
     )
+
+
+floatToTime : Float -> String
+floatToTime t =
+    (toString ((round t) // 60)) ++ ":" ++ (String.padLeft 2 '0' (toString ((round t) % 60))) ++ "." ++ (toString (round (t * 100) % 100))
 
 
 clipsView : Float -> List ( Clip, Source ) -> Svg Msg
