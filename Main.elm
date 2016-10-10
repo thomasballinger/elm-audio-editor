@@ -344,7 +344,25 @@ unscheduledClips model =
 
 unscheduleClip : Int -> Model -> Model
 unscheduleClip index model =
-    model
+    { model
+        | sources =
+            updateClips
+                (\clip ->
+                    { clip
+                        | uses =
+                            clip.uses
+                                |> List.filter (\i -> i /= index)
+                                |> List.map
+                                    (\i ->
+                                        if i > index then
+                                            i - 1
+                                        else
+                                            i
+                                    )
+                    }
+                )
+                model.sources
+    }
 
 
 scheduleClipAtEnd : Int -> Model -> Model
