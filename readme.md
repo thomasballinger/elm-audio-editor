@@ -1,11 +1,9 @@
 
 ##TODO
 
-* show which source clips belong to
-* list clips in order
-* build list of jumps from clips
 * zoom
 * drag to change selections
+* build list of jumps from clips
 * move selections to delete or something
 
 #Dev Setup

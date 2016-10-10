@@ -26,24 +26,27 @@ main =
                 Sub.batch
                     ([ Window.resizes WinSize ]
                         ++ case model.drag of
-                            --Nothing -> AnimationFrame.times Tick
-                            Nothing ->
+                            NoDrag ->
                                 []
 
-                            Just drag ->
-                                [ Mouse.moves (DragAt drag.clipId)
-                                , Mouse.ups (DragEnd drag.clipId)
+                            _ ->
+                                [ Mouse.moves DragAt
+                                , Mouse.ups DragEnd
                                 ]
                     )
         }
 
 
-type
-    Msg
-    --    = Tick Time.Time
-    = DragStart Int Position
-    | DragAt Int Position
-    | DragEnd Int Position
+
+-- Since we have to keep track of drags ourselves, a drag handler should be able to specify
+-- what kind of Drag, and what message it wants sent at DragEnd.
+-- DragStart (Drag -> Msg) (Drag -> Msg) Position
+
+
+type Msg
+    = DragStart (Position -> Drag) Position
+    | DragAt Position
+    | DragEnd Position
     | WinSize Window.Size
     | NoOp
     | AudioLengthKnown String Float
@@ -54,7 +57,7 @@ type
 init =
     ( { sources = []
       , sourceUrls = [ "audio1.ogg", "audio2.ogg", "audio3.ogg" ]
-      , drag = Nothing
+      , drag = NoDrag
       , windowSize = ( 100, 100 )
       , viewboxWidth = 400.0
       , viewboxHeight = 200.0
@@ -76,7 +79,7 @@ allClipsWithSources model =
 type alias Model =
     { sources : List Source
     , sourceUrls : List String
-    , drag : Maybe Drag
+    , drag : Drag
     , windowSize : ( Int, Int )
     , viewboxWidth : Float
     , viewboxHeight : Float
@@ -101,22 +104,18 @@ type alias Clip =
     }
 
 
-type alias Drag =
-    { clipId :
-        Int
-        --TODO change this to id or something, it could be a clip or a source
-    , start : Position
-    , current : Position
-    }
+type Drag
+    = NoDrag
+    | MoveClipDrag Int Position Position
+    | NewClipDrag Int Position Position
+    | ResizeClipLeftDrag Int Position Position
+    | ResizeClipRightDrag Int Position Position
 
 
 newClipsFromDrag : Model -> Source -> List Clip
 newClipsFromDrag model source =
     case model.drag of
-        Nothing ->
-            []
-
-        Just drag ->
+        NewClipDrag sourceId dragStart current ->
             let
                 ( winWidth, winHeight ) =
                     model.windowSize
@@ -129,62 +128,59 @@ newClipsFromDrag model source =
                     model.viewboxHeight / (toFloat winHeight)
 
                 end =
-                    (Basics.max (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
+                    (Basics.max (toFloat dragStart.x) (toFloat current.x)) * widthRatio
 
                 start =
-                    (Basics.min (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
+                    (Basics.min (toFloat dragStart.x) (toFloat current.x)) * widthRatio
             in
-                [ (Clip (nextId model) start (end - start) start []) ]
+                if source.id == sourceId then
+                    [ (Clip (nextId model) start (end - start) start []) ]
+                else
+                    []
+
+        _ ->
+            []
 
 
 clipWithDrag : Model -> Clip -> Clip
 clipWithDrag model clip =
-    case model.drag of
-        Just drag ->
-            let
-                ( winWidth, winHeight ) =
-                    model.windowSize
+    let
+        ( dx, dxLeft, dxRight, clipId ) =
+            case model.drag of
+                MoveClipDrag clipId start current ->
+                    ( ((toFloat current.x) - (toFloat start.x)), 0, 0, clipId )
 
-                widthRatio =
-                    model.viewboxWidth
-                        / (toFloat winWidth)
+                ResizeClipLeftDrag clipId start current ->
+                    ( 0, ((toFloat current.x) - (toFloat start.x)), 0, clipId )
 
-                heightRatio =
-                    model.viewboxHeight / (toFloat winHeight)
-            in
-                { clip | start = clip.start + ((toFloat drag.current.x) - (toFloat drag.start.x)) * widthRatio }
+                ResizeClipRightDrag clipId start current ->
+                    ( 0, 0, ((toFloat current.x) - (toFloat start.x)), clipId )
 
-        Nothing ->
+                _ ->
+                    ( 0, 0, 0, -1 )
+    in
+        if clipId == clip.id then
+            clipMovedByScreenX model dx dxLeft dxRight clip
+        else
             clip
 
 
-applyDrag : Model -> Drag -> Model
-applyDrag model drag =
-    if drag.start == drag.current then
-        { model | drag = Nothing }
-    else
-        { model
-            | sources =
-                model.sources
-                    |> updateClips
-                        (\clip ->
-                            if clip.id == drag.clipId then
-                                clipWithDrag model clip
-                            else
-                                clip
-                        )
-                    |> List.map
-                        (\source ->
-                            if source.id == drag.clipId then
-                                { source
-                                    | clips =
-                                        List.append (newClipsFromDrag model source)
-                                            source.clips
-                                }
-                            else
-                                source
-                        )
-            , drag = Nothing
+clipMovedByScreenX : Model -> Float -> Float -> Float -> Clip -> Clip
+clipMovedByScreenX model dx dxLeft dxRight clip =
+    let
+        ( winWidth, winHeight ) =
+            model.windowSize
+
+        widthRatio =
+            model.viewboxWidth
+                / (toFloat winWidth)
+
+        heightRatio =
+            model.viewboxHeight / (toFloat winHeight)
+    in
+        { clip
+            | start = clip.start + (dx + dxLeft) * widthRatio
+            , length = clip.length + (dxRight - dxLeft) * widthRatio
         }
 
 
@@ -221,37 +217,71 @@ update msg model =
     ( (updateHelp msg model), Cmd.none )
 
 
-
---TODO different kinds of drags
-
-
-type DragType
-    = NewClip Int
-    | MoveClip Int
-    | ResizeClipLeft Int
-    | ResizeClipRight Int
-
-
 updateHelp : Msg -> Model -> Model
 updateHelp msg model =
     case msg of
-        DragStart id xy ->
-            { model | drag = Just (Drag id xy xy) }
+        DragStart dragBuilder xy ->
+            { model | drag = dragBuilder xy }
 
-        DragAt id xy ->
-            { model | drag = (Maybe.map (\{ start, clipId } -> Drag clipId start xy) model.drag) }
-
-        --TODO this update should be based on the current zoom
-        DragEnd id _ ->
+        DragAt xy ->
             case model.drag of
-                Nothing ->
+                NoDrag ->
                     model
 
-                Just drag ->
-                    if drag.start == drag.current then
-                        { model | drag = Nothing }
-                    else
-                        applyDrag model drag
+                MoveClipDrag clipId start cur ->
+                    { model | drag = (MoveClipDrag clipId start xy) }
+
+                ResizeClipLeftDrag clipId start cur ->
+                    { model | drag = (ResizeClipLeftDrag clipId start xy) }
+
+                ResizeClipRightDrag clipId start cur ->
+                    { model | drag = (ResizeClipRightDrag clipId start xy) }
+
+                NewClipDrag sourceId start cur ->
+                    { model | drag = (NewClipDrag sourceId start xy) }
+
+        DragEnd position ->
+            let
+                drag =
+                    nopDragIfSmall model.drag
+
+                afterDrag =
+                    case drag of
+                        NoDrag ->
+                            model
+
+                        MoveClipDrag clipId start current ->
+                            { model
+                                | sources =
+                                    model.sources
+                                        |> updateClips (clipWithDrag model)
+                            }
+
+                        ResizeClipLeftDrag clipId start current ->
+                            { model
+                                | sources =
+                                    model.sources
+                                        |> updateClips (clipWithDrag model)
+                            }
+
+                        ResizeClipRightDrag clipId start current ->
+                            { model
+                                | sources =
+                                    model.sources
+                                        |> updateClips (clipWithDrag model)
+                            }
+
+                        NewClipDrag sourceId start current ->
+                            { model
+                                | sources =
+                                    List.map
+                                        (\source ->
+                                            { source | clips = source.clips ++ (newClipsFromDrag model source) }
+                                        )
+                                        model.sources
+                            }
+            in
+                { afterDrag | drag = NoDrag }
 
         WinSize size ->
             { model | windowSize = ( size.width, size.height ) }
@@ -271,6 +301,32 @@ updateHelp msg model =
 
         UnSchedule index ->
             unscheduleClip index model
+
+
+nopDragIfSmall : Drag -> Drag
+nopDragIfSmall drag =
+    let
+        ( initial, current ) =
+            case drag of
+                NoDrag ->
+                    ( (Position 0 0), (Position 0 0) )
+
+                MoveClipDrag _ initial current ->
+                    ( initial, current )
+
+                ResizeClipLeftDrag _ initial current ->
+                    ( initial, current )
+
+                ResizeClipRightDrag _ initial current ->
+                    ( initial, current )
+
+                NewClipDrag _ initial current ->
+                    ( initial, current )
+    in
+        if initial == current then
+            NoDrag
+        else
+            drag
 
 
 scheduledUses : Model -> List ( Int, Clip, Source )
@@ -436,22 +492,31 @@ audioEmbed url =
 
 dragGuides : Model -> List (Svg Msg)
 dragGuides model =
-    case model.drag of
-        Nothing ->
-            []
+    let
+        modClip =
+            \clipId ->
+                (allClipsWithSources model)
+                    |> List.filter (\( clip, source ) -> clip.id == clipId)
+                    |> List.map (\( clip, source ) -> ( clipWithDrag model clip, source ))
+                    |> List.map (\( clip, source ) -> shadow source.yPos clip)
+    in
+        case model.drag of
+            NoDrag ->
+                []
 
-        Just drag ->
-            (((allClipsWithSources model)
-                |> List.filter (\( clip, source ) -> clip.id == drag.clipId)
-                |> List.map (\( clip, source ) -> ( clipWithDrag model clip, source ))
-                |> List.map (\( clip, source ) -> shadow source.yPos clip)
-             )
-                ++ (model.sources
-                        |> List.filter (\source -> source.id == drag.clipId)
-                        |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
-                        |> List.map (\( clip, source ) -> (shadow source.yPos clip))
-                   )
-            )
+            MoveClipDrag clipId start cur ->
+                modClip clipId
+
+            ResizeClipLeftDrag clipId start cur ->
+                modClip clipId
+
+            ResizeClipRightDrag clipId start cur ->
+                modClip clipId
+
+            NewClipDrag sourceId start cur ->
+                model.sources
+                    |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
+                    |> List.map (\( clip, source ) -> (shadow source.yPos clip))
 
 
 sourceView : Source -> Svg Msg
@@ -463,7 +528,7 @@ sourceView source =
                 , y (toString source.yPos)
                 , width (toString source.length)
                 , height "10"
-                , Html.Events.on "mousedown" (Json.map (DragStart source.id) Mouse.position)
+                , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> NewClipDrag source.id pos pos)) Mouse.position)
                 ]
                 []
            )
@@ -476,51 +541,57 @@ sourceView source =
                 [ text source.url ]
            )
          ]
-            ++ (List.map (clipRectOfOpacityColorY "1" "green" source.yPos) source.clips)
+            ++ (List.map (clipWithResizeControls source.yPos) source.clips)
         )
     )
 
 
-clipRectOfOpacityColorY : String -> String -> Float -> Clip -> Svg Msg
-clipRectOfOpacityColorY o c yVal clip =
-    (rect
-        [ fill c
-        , opacity o
-        , x (toString clip.start)
-        , y (toString yVal)
-        , width (toString clip.length)
-        , height "10"
-        , Html.Events.on "mousedown" (Json.map (DragStart clip.id) Mouse.position)
+clipWithResizeControls : Float -> Clip -> Svg Msg
+clipWithResizeControls yVal clip =
+    (g []
+        [ (rect
+            [ fill "green"
+            , x (toString clip.start)
+            , y (toString yVal)
+            , width (toString clip.length)
+            , height "10"
+            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> MoveClipDrag clip.id pos pos)) Mouse.position)
+            ]
+            []
+          )
+        , (rect
+            [ fill "darkgreen"
+            , x (toString clip.start)
+            , y (toString (yVal - 3))
+            , width "3"
+            , height "5"
+            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> ResizeClipLeftDrag clip.id pos pos)) Mouse.position)
+            ]
+            []
+          )
+        , (rect
+            [ fill "darkgreen"
+            , x (toString (clip.start + clip.length))
+            , y (toString (yVal + 7))
+            , width "3"
+            , height "5"
+            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> ResizeClipRightDrag clip.id pos pos)) Mouse.position)
+            ]
+            []
+          )
         ]
-        []
     )
 
 
 shadow : Float -> Clip -> Svg Msg
-shadow =
-    clipRectOfOpacityColorY "0.5" "gray"
-
-
-nop =
-    svg
-        [ version "1.1"
-        , x "0"
-        , y "0"
-        , viewBox "0 0 323.141 322.95"
+shadow yVal clip =
+    (rect
+        [ fill "gray"
+        , opacity "0.5"
+        , x (toString clip.start)
+        , y (toString yVal)
+        , width (toString clip.length)
+        , height "10"
         ]
-        [ polygon [ fill "#F0AD00", points "161.649,152.782 231.514,82.916 91.783,82.916" ] []
-        , polygon [ fill "#7FD13B", points "8.867,0 79.241,70.375 232.213,70.375 161.838,0" ] []
-        , rect
-            [ fill "#7FD13B"
-            , x "192.99"
-            , y "107.392"
-            , width "107.676"
-            , height "108.167"
-            , transform "matrix(0.7071 0.7071 -0.7071 0.7071 186.4727 -127.2386)"
-            ]
-            []
-        , polygon [ fill "#60B5CC", points "323.298,143.724 323.298,0 179.573,0" ] []
-        , polygon [ fill "#5A6378", points "152.781,161.649 0,8.868 0,314.432" ] []
-        , polygon [ fill "#F0AD00", points "255.522,246.655 323.298,314.432 323.298,178.879" ] []
-        , polygon [ fill "#60B5CC", points "161.649,170.517 8.869,323.298 314.43,323.298" ] []
-        ]
+        []
+    )
