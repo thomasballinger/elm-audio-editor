@@ -19,3 +19,10 @@ audio3.ogg:
 	wget https://upload.wikimedia.org/wikipedia/commons/2/22/Colonel_Bogey.ogg --output-document audio3.ogg
 	# from https://commons.wikimedia.org/wiki/File:Colonel_Bogey.ogg
 
+build: build.js index.html main.css assets
+	rm -rf build
+	mkdir build
+	cp main.css *.ogg index.html build.js build/
+
+deploy: build
+	aws s3 sync build 's3://remixcast.com/editor/' --delete
