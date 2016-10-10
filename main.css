@@ -6,3 +6,9 @@ text {
   -webkit-user-select: none;
   -ms-user-select: none
 }
+.horzCursor {
+  cursor: ew-resize;
+}
+.moveCursor {
+  cursor: move;
+}

@@ -177,10 +177,16 @@ clipMovedByScreenX model dx dxLeft dxRight clip =
 
         heightRatio =
             model.viewboxHeight / (toFloat winHeight)
+
+        a =
+            clip.start + (dx + dxLeft) * widthRatio
+
+        b =
+            clip.start + clip.length + (dx + dxRight) * widthRatio
     in
         { clip
-            | start = clip.start + (dx + dxLeft) * widthRatio
-            , length = clip.length + (dxRight - dxLeft) * widthRatio
+            | start = Basics.min a b
+            , length = abs (a - b)
         }
 
 
@@ -407,7 +413,7 @@ unusedClipRect yVal ( clip, source ) =
             [ fill "green"
             , x "0"
             , y (toString yVal)
-            , width (toString (clip.length + 20))
+            , width (toString (clip.length))
             , height "10"
             , Html.Events.onClick (Schedule clip.id)
             ]
@@ -436,17 +442,35 @@ unusedClipRect yVal ( clip, source ) =
 
 
 usedClipRect : Float -> ( Int, Clip, Source ) -> Svg Msg
-usedClipRect yVal ( index, clip, source ) =
-    (rect
-        [ fill "green"
-        , x (toString (index * 20))
-        , y (toString (index * 20 + yVal))
-        , width (toString (clip.length))
-        , height "10"
-        , Html.Events.onClick (UnSchedule index)
-        ]
-        []
-    )
+usedClipRect yOffset ( index, clip, source ) =
+    let
+        yVal =
+            index * 20 + yOffset
+
+        xVal =
+            index * 20
+    in
+        (g []
+            [ (rect
+                [ fill "green"
+                , x (toString xVal)
+                , y (toString yVal)
+                , width (toString (clip.length))
+                , height "10"
+                , Html.Events.onClick (UnSchedule index)
+                ]
+                []
+              )
+            , (text'
+                [ x (toString xVal)
+                , y (toString (yVal - 1))
+                , fontFamily "Verdana"
+                , fontSize "4"
+                ]
+                [ text (source.url ++ "   " ++ (floatToTime clip.length)) ]
+              )
+            ]
+        )
 
 
 floatToTime : Float -> String
@@ -552,7 +576,7 @@ sourceView source =
            )
          , (text'
                 [ x "2"
-                , y (toString (source.yPos + 5))
+                , y (toString (source.yPos - 1))
                 , fontFamily "Verdana"
                 , fontSize "4"
                 ]
@@ -569,10 +593,13 @@ clipWithResizeControls yVal clip =
     (g []
         [ (rect
             [ fill "green"
+            , stroke "black"
+            , strokeWidth ".2"
             , x (toString clip.start)
             , y (toString yVal)
             , width (toString clip.length)
             , height "10"
+            , class "moveCursor"
             , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> MoveClipDrag clip.id pos pos)) Mouse.position)
             ]
             []
@@ -583,6 +610,7 @@ clipWithResizeControls yVal clip =
             , y (toString (yVal - 3))
             , width "3"
             , height "5"
+            , class "horzCursor"
             , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> ResizeClipLeftDrag clip.id pos pos)) Mouse.position)
             ]
             []
@@ -593,6 +621,7 @@ clipWithResizeControls yVal clip =
             , y (toString (yVal + 7))
             , width "3"
             , height "5"
+            , class "horzCursor"
             , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> ResizeClipRightDrag clip.id pos pos)) Mouse.position)
             ]
             []
