@@ -1,10 +1,15 @@
 
 ##TODO
 
-* zoom
-* drag to change selections
+* drag event refactor
+* listen at points in sources
+* listen to cuts
+* preview mix
 * build list of jumps from clips
+* zoom
+* drag to change order
 * move selections to delete or something
+* save current setup OR maybe outputing a remix spec is enough?
 
 #Dev Setup
 
