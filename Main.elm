@@ -26,10 +26,10 @@ main =
                 Sub.batch
                     ([ Window.resizes WinSize ]
                         ++ case model.drag of
-                            NoDrag ->
+                            Nothing ->
                                 []
 
-                            _ ->
+                            Just _ ->
                                 [ Mouse.moves DragAt
                                 , Mouse.ups DragEnd
                                 ]
@@ -57,7 +57,7 @@ type Msg
 init =
     ( { sources = []
       , sourceUrls = [ "audio1.ogg", "audio2.ogg", "audio3.ogg" ]
-      , drag = NoDrag
+      , drag = Nothing
       , windowSize = ( 100, 100 )
       , viewboxWidth = 400.0
       , viewboxHeight = 200.0
@@ -79,7 +79,7 @@ allClipsWithSources model =
 type alias Model =
     { sources : List Source
     , sourceUrls : List String
-    , drag : Drag
+    , drag : Maybe Drag
     , windowSize : ( Int, Int )
     , viewboxWidth : Float
     , viewboxHeight : Float
@@ -104,42 +104,53 @@ type alias Clip =
     }
 
 
-type Drag
-    = NoDrag
-    | MoveClipDrag Int Position Position
-    | NewClipDrag Int Position Position
-    | ResizeClipLeftDrag Int Position Position
-    | ResizeClipRightDrag Int Position Position
+type alias Drag =
+    { dragType : DragType
+    , start : Position
+    , current : Position
+    }
+
+
+type DragType
+    = MoveClipDrag Int
+    | NewClipDrag Int
+    | ResizeClipLeftDrag Int
+    | ResizeClipRightDrag Int
 
 
 newClipsFromDrag : Model -> Source -> List Clip
 newClipsFromDrag model source =
     case model.drag of
-        NewClipDrag sourceId dragStart current ->
-            let
-                ( winWidth, winHeight ) =
-                    model.windowSize
-
-                widthRatio =
-                    model.viewboxWidth
-                        / (toFloat winWidth)
-
-                heightRatio =
-                    model.viewboxHeight / (toFloat winHeight)
-
-                end =
-                    (Basics.max (toFloat dragStart.x) (toFloat current.x)) * widthRatio
-
-                start =
-                    (Basics.min (toFloat dragStart.x) (toFloat current.x)) * widthRatio
-            in
-                if source.id == sourceId then
-                    [ (Clip (nextId model) start (end - start) start []) ]
-                else
-                    []
-
-        _ ->
+        Nothing ->
             []
+
+        Just drag ->
+            case drag.dragType of
+                NewClipDrag sourceId ->
+                    let
+                        ( winWidth, winHeight ) =
+                            model.windowSize
+
+                        widthRatio =
+                            model.viewboxWidth
+                                / (toFloat winWidth)
+
+                        heightRatio =
+                            model.viewboxHeight / (toFloat winHeight)
+
+                        end =
+                            (Basics.max (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
+
+                        start =
+                            (Basics.min (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
+                    in
+                        if source.id == sourceId then
+                            [ (Clip (nextId model) start (end - start) start []) ]
+                        else
+                            []
+
+                _ ->
+                    []
 
 
 clipWithDrag : Model -> Clip -> Clip
@@ -147,17 +158,22 @@ clipWithDrag model clip =
     let
         ( dx, dxLeft, dxRight, clipId ) =
             case model.drag of
-                MoveClipDrag clipId start current ->
-                    ( ((toFloat current.x) - (toFloat start.x)), 0, 0, clipId )
-
-                ResizeClipLeftDrag clipId start current ->
-                    ( 0, ((toFloat current.x) - (toFloat start.x)), 0, clipId )
-
-                ResizeClipRightDrag clipId start current ->
-                    ( 0, 0, ((toFloat current.x) - (toFloat start.x)), clipId )
-
-                _ ->
+                Nothing ->
                     ( 0, 0, 0, -1 )
+
+                Just drag ->
+                    case drag.dragType of
+                        MoveClipDrag clipId ->
+                            ( ((toFloat drag.current.x) - (toFloat drag.start.x)), 0, 0, clipId )
+
+                        ResizeClipLeftDrag clipId ->
+                            ( 0, ((toFloat drag.current.x) - (toFloat drag.start.x)), 0, clipId )
+
+                        ResizeClipRightDrag clipId ->
+                            ( 0, 0, ((toFloat drag.current.x) - (toFloat drag.start.x)), clipId )
+
+                        _ ->
+                            ( 0, 0, 0, -1 )
     in
         if clipId == clip.id then
             clipMovedByScreenX model dx dxLeft dxRight clip
@@ -227,67 +243,52 @@ updateHelp : Msg -> Model -> Model
 updateHelp msg model =
     case msg of
         DragStart dragBuilder xy ->
-            { model | drag = dragBuilder xy }
+            { model | drag = Just (dragBuilder xy) }
 
         DragAt xy ->
             case model.drag of
-                NoDrag ->
+                Nothing ->
                     model
 
-                MoveClipDrag clipId start cur ->
-                    { model | drag = (MoveClipDrag clipId start xy) }
-
-                ResizeClipLeftDrag clipId start cur ->
-                    { model | drag = (ResizeClipLeftDrag clipId start xy) }
-
-                ResizeClipRightDrag clipId start cur ->
-                    { model | drag = (ResizeClipRightDrag clipId start xy) }
-
-                NewClipDrag sourceId start cur ->
-                    { model | drag = (NewClipDrag sourceId start xy) }
+                Just drag ->
+                    { model | drag = (Just { drag | current = xy }) }
 
         DragEnd position ->
-            let
-                drag =
-                    nopDragIfSmall model.drag
+            case noDragIfSmall model.drag of
+                Nothing ->
+                    { model | drag = Nothing }
 
-                afterDrag =
-                    case drag of
-                        NoDrag ->
-                            model
-
-                        MoveClipDrag clipId start current ->
+                Just drag ->
+                    let
+                        updatedWithDrag clip model =
                             { model
                                 | sources =
                                     model.sources
                                         |> updateClips (clipWithDrag model)
                             }
 
-                        ResizeClipLeftDrag clipId start current ->
-                            { model
-                                | sources =
-                                    model.sources
-                                        |> updateClips (clipWithDrag model)
-                            }
+                        afterDrag =
+                            case drag.dragType of
+                                MoveClipDrag _ ->
+                                    updatedWithDrag drag model
 
-                        ResizeClipRightDrag clipId start current ->
-                            { model
-                                | sources =
-                                    model.sources
-                                        |> updateClips (clipWithDrag model)
-                            }
+                                ResizeClipLeftDrag _ ->
+                                    updatedWithDrag drag model
 
-                        NewClipDrag sourceId start current ->
-                            { model
-                                | sources =
-                                    List.map
-                                        (\source ->
-                                            { source | clips = source.clips ++ (newClipsFromDrag model source) }
-                                        )
-                                        model.sources
-                            }
-            in
-                { afterDrag | drag = NoDrag }
+                                ResizeClipRightDrag _ ->
+                                    updatedWithDrag drag model
+
+                                NewClipDrag sourceId ->
+                                    { model
+                                        | sources =
+                                            List.map
+                                                (\source ->
+                                                    { source | clips = source.clips ++ (newClipsFromDrag model source) }
+                                                )
+                                                model.sources
+                                    }
+                    in
+                        { afterDrag | drag = Nothing }
 
         WinSize size ->
             { model | windowSize = ( size.width, size.height ) }
@@ -309,30 +310,17 @@ updateHelp msg model =
             unscheduleClip index model
 
 
-nopDragIfSmall : Drag -> Drag
-nopDragIfSmall drag =
-    let
-        ( initial, current ) =
-            case drag of
-                NoDrag ->
-                    ( (Position 0 0), (Position 0 0) )
+noDragIfSmall : Maybe Drag -> Maybe Drag
+noDragIfSmall drag =
+    case drag of
+        Nothing ->
+            Nothing
 
-                MoveClipDrag _ initial current ->
-                    ( initial, current )
-
-                ResizeClipLeftDrag _ initial current ->
-                    ( initial, current )
-
-                ResizeClipRightDrag _ initial current ->
-                    ( initial, current )
-
-                NewClipDrag _ initial current ->
-                    ( initial, current )
-    in
-        if initial == current then
-            NoDrag
-        else
-            drag
+        Just drag ->
+            if drag.start == drag.current then
+                Nothing
+            else
+                Just drag
 
 
 scheduledUses : Model -> List ( Int, Clip, Source )
@@ -543,22 +531,24 @@ dragGuides model =
                     |> List.map (\( clip, source ) -> shadow source.yPos clip)
     in
         case model.drag of
-            NoDrag ->
+            Nothing ->
                 []
 
-            MoveClipDrag clipId start cur ->
-                modClip clipId
+            Just drag ->
+                case drag.dragType of
+                    MoveClipDrag clipId ->
+                        modClip clipId
 
-            ResizeClipLeftDrag clipId start cur ->
-                modClip clipId
+                    ResizeClipLeftDrag clipId ->
+                        modClip clipId
 
-            ResizeClipRightDrag clipId start cur ->
-                modClip clipId
+                    ResizeClipRightDrag clipId ->
+                        modClip clipId
 
-            NewClipDrag sourceId start cur ->
-                model.sources
-                    |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
-                    |> List.map (\( clip, source ) -> (shadow source.yPos clip))
+                    NewClipDrag sourceId ->
+                        model.sources
+                            |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
+                            |> List.map (\( clip, source ) -> (shadow source.yPos clip))
 
 
 sourceView : Source -> Svg Msg
@@ -570,7 +560,7 @@ sourceView source =
                 , y (toString source.yPos)
                 , width (toString source.length)
                 , height "10"
-                , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> NewClipDrag source.id pos pos)) Mouse.position)
+                , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> Drag (NewClipDrag source.id) pos pos)) Mouse.position)
                 ]
                 []
            )
@@ -600,7 +590,7 @@ clipWithResizeControls yVal clip =
             , width (toString clip.length)
             , height "10"
             , class "moveCursor"
-            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> MoveClipDrag clip.id pos pos)) Mouse.position)
+            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> Drag (MoveClipDrag clip.id) pos pos)) Mouse.position)
             ]
             []
           )
@@ -611,7 +601,7 @@ clipWithResizeControls yVal clip =
             , width "3"
             , height "5"
             , class "horzCursor"
-            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> ResizeClipLeftDrag clip.id pos pos)) Mouse.position)
+            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> Drag (ResizeClipLeftDrag clip.id) pos pos)) Mouse.position)
             ]
             []
           )
@@ -622,7 +612,7 @@ clipWithResizeControls yVal clip =
             , width "3"
             , height "5"
             , class "horzCursor"
-            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> ResizeClipRightDrag clip.id pos pos)) Mouse.position)
+            , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> Drag (ResizeClipRightDrag clip.id) pos pos)) Mouse.position)
             ]
             []
           )
