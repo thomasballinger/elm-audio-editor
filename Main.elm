@@ -61,6 +61,8 @@ init =
       , windowSize = ( 100, 100 )
       , viewboxWidth = 400.0
       , viewboxHeight = 200.0
+      , playPosition = Nothing
+      , playStatus = Paused
       }
     , Task.perform (\_ -> NoOp) WinSize Window.size
     )
@@ -83,7 +85,20 @@ type alias Model =
     , windowSize : ( Int, Int )
     , viewboxWidth : Float
     , viewboxHeight : Float
+    , playPosition : Maybe PlayPosition
+    , playStatus : PlayStatus
     }
+
+
+type PlayPosition
+    = SourcePos { clipId : Int, offset : Float }
+    | ClipPos { sourceId : Int, clipId : Int, offset : Float }
+    | MixPos { offset : Float }
+
+
+type PlayStatus
+    = Playing
+    | Paused
 
 
 type alias Source =
