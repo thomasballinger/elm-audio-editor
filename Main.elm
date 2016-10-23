@@ -1,4 +1,4 @@
-module Main exposing (..)
+port module Main exposing (..)
 
 import AnimationFrame
 import Html.App as App
@@ -13,6 +13,9 @@ import Json.Decode as Json
 import Window
 import Task
 import String
+
+
+port playAt : ( String, Float ) -> Cmd msg
 
 
 main : Program Never
@@ -49,9 +52,10 @@ type Msg
     | DragEnd Position
     | WinSize Window.Size
     | NoOp
-    | AudioLengthKnown String Float
+    | AudioLengthKnown String String Float
     | Schedule Int
     | UnSchedule Int
+    | PlaySource Source Float
 
 
 init =
@@ -91,7 +95,7 @@ type alias Model =
 
 
 type PlayPosition
-    = SourcePos { clipId : Int, offset : Float }
+    = SourcePos { sourceId : Int, offset : Float }
     | ClipPos { sourceId : Int, clipId : Int, offset : Float }
     | MixPos { offset : Float }
 
@@ -104,6 +108,7 @@ type PlayStatus
 type alias Source =
     { id : Int
     , url : String
+    , elementClass : String
     , length : Float
     , clips : List Clip
     , yPos : Float
@@ -166,6 +171,19 @@ newClipsFromDrag model source =
 
                 _ ->
                     []
+
+
+dxToDuration : Model -> Float -> Float
+dxToDuration model dx =
+    let
+        ( winWidth, winHeight ) =
+            model.windowSize
+
+        widthRatio =
+            model.viewboxWidth
+                / (toFloat winWidth)
+    in
+        dx * widthRatio
 
 
 clipWithDrag : Model -> Clip -> Clip
@@ -249,93 +267,145 @@ updateClips update sources =
         sources
 
 
+clipSource : Model -> Int -> Maybe Source
+clipSource model clipId =
+    model.sources
+        |> List.filter
+            (\source ->
+                (source.clips
+                    |> List.filter (\clip -> clip.id == clipId)
+                    |> List.length
+                )
+                    == 1
+            )
+        |> List.head
+
+
+sourceById : Model -> Int -> Maybe Source
+sourceById model sourceId =
+    model.sources
+        |> List.filter (\source -> source.id == sourceId)
+        |> List.head
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    ( (updateHelp msg model), Cmd.none )
-
-
-updateHelp : Msg -> Model -> Model
-updateHelp msg model =
     case msg of
         DragStart dragBuilder xy ->
-            { model | drag = Just (dragBuilder xy) }
+            ( { model | drag = Just (dragBuilder xy) }, Cmd.none )
 
         DragAt xy ->
-            case model.drag of
+            ( case model.drag of
                 Nothing ->
                     model
 
                 Just drag ->
                     { model | drag = (Just { drag | current = xy }) }
+            , Cmd.none
+            )
 
         DragEnd position ->
-            case noDragIfSmall model.drag of
+            case model.drag of
                 Nothing ->
-                    { model | drag = Nothing }
+                    ( { model | drag = Nothing }, Cmd.none )
 
                 Just drag ->
-                    let
-                        updatedWithDrag clip model =
-                            { model
-                                | sources =
-                                    model.sources
-                                        |> updateClips (clipWithDrag model)
-                            }
+                    if dragIsSmall drag then
+                        let
+                            ( newValue, newCmd ) =
+                                update (clickFromDrag model drag) { model | drag = Nothing }
+                        in
+                            ( newValue, newCmd )
+                    else
+                        let
+                            updatedWithDrag clip model =
+                                { model
+                                    | sources =
+                                        model.sources
+                                            |> updateClips (clipWithDrag model)
+                                }
 
-                        afterDrag =
-                            case drag.dragType of
-                                MoveClipDrag _ ->
-                                    updatedWithDrag drag model
+                            afterDrag =
+                                case drag.dragType of
+                                    MoveClipDrag _ ->
+                                        updatedWithDrag drag model
 
-                                ResizeClipLeftDrag _ ->
-                                    updatedWithDrag drag model
+                                    ResizeClipLeftDrag _ ->
+                                        updatedWithDrag drag model
 
-                                ResizeClipRightDrag _ ->
-                                    updatedWithDrag drag model
+                                    ResizeClipRightDrag _ ->
+                                        updatedWithDrag drag model
 
-                                NewClipDrag sourceId ->
-                                    { model
-                                        | sources =
-                                            List.map
-                                                (\source ->
-                                                    { source | clips = source.clips ++ (newClipsFromDrag model source) }
-                                                )
-                                                model.sources
-                                    }
-                    in
-                        { afterDrag | drag = Nothing }
+                                    NewClipDrag sourceId ->
+                                        { model
+                                            | sources =
+                                                List.map
+                                                    (\source ->
+                                                        { source | clips = source.clips ++ (newClipsFromDrag model source) }
+                                                    )
+                                                    model.sources
+                                        }
+                        in
+                            ( { afterDrag | drag = Nothing }, Cmd.none )
 
         WinSize size ->
-            { model | windowSize = ( size.width, size.height ) }
+            ( { model | windowSize = ( size.width, size.height ) }, Cmd.none )
 
         NoOp ->
-            model
+            ( model, Cmd.none )
 
-        AudioLengthKnown url length ->
-            { model
+        AudioLengthKnown url elClass length ->
+            ( { model
                 | sources =
-                    (Source (nextId model) url length [] (toFloat (List.length model.sources) * 15 + 10))
+                    (Source (nextId model) url elClass length [] (toFloat (List.length model.sources) * 15 + 10))
                         :: model.sources
-            }
+              }
+            , Cmd.none
+            )
 
         Schedule clipId ->
-            scheduleClipAtEnd clipId model
+            ( scheduleClipAtEnd clipId model, Cmd.none )
 
         UnSchedule index ->
-            unscheduleClip index model
+            ( unscheduleClip index model, Cmd.none )
+
+        PlaySource source offset ->
+            ( { model
+                | playStatus = Playing
+                , playPosition = Just (SourcePos { sourceId = source.id, offset = offset })
+              }
+            , playAt ( source.elementClass, dxToDuration model offset )
+            )
 
 
-noDragIfSmall : Maybe Drag -> Maybe Drag
-noDragIfSmall drag =
-    case drag of
-        Nothing ->
-            Nothing
+dragIsSmall : Drag -> Bool
+dragIsSmall drag =
+    drag.start == drag.current
 
-        Just drag ->
-            if drag.start == drag.current then
-                Nothing
-            else
-                Just drag
+
+clickFromDrag : Model -> Drag -> Msg
+clickFromDrag model drag =
+    let
+        source =
+            case drag.dragType of
+                NewClipDrag sourceId ->
+                    sourceById model sourceId
+
+                MoveClipDrag clipId ->
+                    clipSource model clipId
+
+                ResizeClipLeftDrag clipId ->
+                    clipSource model clipId
+
+                ResizeClipRightDrag clipId ->
+                    clipSource model clipId
+    in
+        case source of
+            Nothing ->
+                NoOp
+
+            Just src ->
+                (PlaySource src (toFloat drag.start.x))
 
 
 scheduledUses : Model -> List ( Int, Clip, Source )
@@ -514,7 +584,7 @@ view model =
                    ]
             )
          ]
-            ++ List.map audioEmbed model.sourceUrls
+            ++ List.indexedMap audioEmbed model.sourceUrls
         )
 
 
@@ -527,12 +597,17 @@ onLoadedMetadata msg =
     Html.Events.on "loadedmetadata" (Json.map msg targetDuration)
 
 
-audioEmbed url =
-    Html.audio
-        [ src url
-        , onLoadedMetadata (AudioLengthKnown url)
-        ]
-        []
+audioEmbed i url =
+    let
+        cls =
+            ("audio-source-" ++ (toString i))
+    in
+        Html.audio
+            [ src url
+            , onLoadedMetadata (AudioLengthKnown url cls)
+            , class cls
+            ]
+            []
 
 
 dragGuides : Model -> List (Svg Msg)
