@@ -10,19 +10,23 @@
       elementClass = stuff[0]
       offset = stuff[1]
 
-      var toPause = Array.prototype.slice.call(document.getElementsByTagName('audio'));
       var audioEl = Array.prototype.slice.call(document.getElementsByClassName(elementClass));
       if (audioEl.length !== 1){
         throw Error("Can't find audio element with class name: "+elementClass);
       }
-      toPause.forEach(function(x){
-        x.pause()
-      });
+      pause();
       audioEl.forEach(function(x){
         x.currentTime = offset;
         x.play();
       });
     });
+    function pause(unused){
+      var toPause = Array.prototype.slice.call(document.getElementsByTagName('audio'));
+      toPause.forEach(function(x){
+        x.pause()
+      });
+    }
+    app.ports.pause.subscribe(pause);
   </script>
 </body>
 </html>

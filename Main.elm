@@ -18,6 +18,9 @@ import String
 port playAt : ( String, Float ) -> Cmd msg
 
 
+port pause : Int -> Cmd msg
+
+
 main : Program Never
 main =
     App.program
@@ -57,6 +60,7 @@ type Msg
     | Schedule Int
     | UnSchedule Int
     | PlaySource Source Float
+    | PlayClip Clip Float
 
 
 init =
@@ -166,7 +170,7 @@ newClipsFromDrag model source =
                             (Basics.min (toFloat drag.start.x) (toFloat drag.current.x)) * widthRatio
                     in
                         if source.id == sourceId then
-                            [ (Clip (nextId model) start (end - start) start []) ]
+                            [ (Clip (nextId model) start (end - start) 0 []) ]
                         else
                             []
 
@@ -229,19 +233,24 @@ clipMovedByScreenX model dx dxLeft dxRight clip =
             model.viewboxHeight / (toFloat winHeight)
 
         a =
-            clip.start + (dx + dxLeft) * widthRatio
+            clip.sourceStart + (dx + dxLeft) * widthRatio
 
         b =
-            clip.start + clip.length + (dx + dxRight) * widthRatio
+            clip.sourceStart + clip.length + (dx + dxRight) * widthRatio
     in
         { clip
-            | start = Basics.min a b
+            | sourceStart = Basics.min a b
             , length = abs (a - b)
         }
 
 
 nextId : Model -> Int
 nextId model =
+    (maxId model) + 1
+
+
+maxId : Model -> Int
+maxId model =
     let
         ids =
             (List.map (.id) model.sources)
@@ -252,7 +261,7 @@ nextId model =
                 0
 
             Just id ->
-                id + 1
+                id
 
 
 updateClips : (Clip -> Clip) -> List Source -> List Source
@@ -289,6 +298,22 @@ sourceById model sourceId =
         |> List.head
 
 
+clipById : Model -> Int -> Maybe Clip
+clipById model clipId =
+    model.sources
+        |> List.concatMap .clips
+        |> List.filter (\clip -> clip.id == clipId)
+        |> List.head
+
+
+sourceAndClipByClipId : Model -> Int -> Maybe ( Source, Clip )
+sourceAndClipByClipId model clipId =
+    model.sources
+        |> List.concatMap (\source -> (List.map (\clip -> ( source, clip )) source.clips))
+        |> List.filter (\( source, clip ) -> clip.id == clipId)
+        |> List.head
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -319,35 +344,54 @@ update msg model =
                             ( newValue, newCmd )
                     else
                         let
-                            updatedWithDrag clip model =
+                            updatedWithDrag : Model -> Model
+                            updatedWithDrag model =
                                 { model
                                     | sources =
                                         model.sources
                                             |> updateClips (clipWithDrag model)
+                                    , drag = Nothing
                                 }
 
-                            afterDrag =
+                            ( afterDrag, clipId, offset ) =
                                 case drag.dragType of
-                                    MoveClipDrag _ ->
-                                        updatedWithDrag drag model
+                                    MoveClipDrag clipId ->
+                                        ( updatedWithDrag model, clipId, 0.0 )
 
-                                    ResizeClipLeftDrag _ ->
-                                        updatedWithDrag drag model
+                                    ResizeClipLeftDrag clipId ->
+                                        ( updatedWithDrag model, clipId, 0.0 )
 
-                                    ResizeClipRightDrag _ ->
-                                        updatedWithDrag drag model
+                                    ResizeClipRightDrag clipId ->
+                                        ( updatedWithDrag model, clipId, -1.0 )
 
                                     NewClipDrag sourceId ->
-                                        { model
-                                            | sources =
-                                                List.map
-                                                    (\source ->
-                                                        { source | clips = source.clips ++ (newClipsFromDrag model source) }
-                                                    )
-                                                    model.sources
-                                        }
+                                        let
+                                            newModel =
+                                                { model
+                                                    | sources =
+                                                        List.map
+                                                            (\source ->
+                                                                { source | clips = source.clips ++ (newClipsFromDrag model source) }
+                                                            )
+                                                            model.sources
+                                                    , drag = Nothing
+                                                }
+                                        in
+                                            ( newModel, maxId newModel, 0.0 )
                         in
-                            ( { afterDrag | drag = Nothing }, Cmd.none )
+                            let
+                                clip =
+                                    (clipById afterDrag clipId)
+                            in
+                                case clip of
+                                    Nothing ->
+                                        ( afterDrag, Cmd.none )
+
+                                    Just c ->
+                                        if offset < 0.0 then
+                                            update (PlayClip c (Basics.max 0 (c.length + offset))) afterDrag
+                                        else
+                                            update (PlayClip c offset) afterDrag
 
         WinSize size ->
             ( { model | windowSize = ( size.width, size.height ) }, Cmd.none )
@@ -370,7 +414,7 @@ update msg model =
                     ( model, Cmd.none )
 
                 Just source ->
-                    ( updatePlayPos source offset model, Cmd.none )
+                    updatePlayPos source offset model
 
         Schedule clipId ->
             ( scheduleClipAtEnd clipId model, Cmd.none )
@@ -386,21 +430,58 @@ update msg model =
             , playAt ( source.elementClass, dxToDuration model offset )
             )
 
+        PlayClip clip offset ->
+            case clipSource model clip.id of
+                Nothing ->
+                    ( model, Cmd.none )
 
-updatePlayPos : Source -> Float -> Model -> Model
+                Just source ->
+                    ( { model
+                        | playStatus = Playing
+                        , playPosition = Just (ClipPos { sourceId = source.id, clipId = clip.id, offset = offset })
+                      }
+                    , playAt ( source.elementClass, clip.sourceStart + offset )
+                    )
+
+
+updatePlayPos : Source -> Float -> Model -> ( Model, Cmd Msg )
 updatePlayPos source offset model =
     case model.playPosition of
         Nothing ->
-            model
+            ( model, Cmd.none )
 
         Just (SourcePos { sourceId }) ->
             if source.id == sourceId then
-                { model | playPosition = Just (SourcePos { sourceId = sourceId, offset = offset }) }
+                -- TODO check for reaching of the end here?
+                ( { model | playPosition = Just (SourcePos { sourceId = sourceId, offset = offset }) }, Cmd.none )
             else
-                model
+                ( model, Cmd.none )
+
+        Just (ClipPos { sourceId, clipId }) ->
+            if source.id == sourceId && List.member clipId (List.map .id source.clips) then
+                case clipById model clipId of
+                    Nothing ->
+                        ( model, Cmd.none )
+
+                    Just clip ->
+                        let
+                            clipOffset =
+                                offset - clip.sourceStart
+                        in
+                            if clipOffset > clip.length then
+                                ( { model
+                                    | playPosition = Nothing
+                                    , playStatus = Paused
+                                  }
+                                , pause 1
+                                )
+                            else
+                                ( { model | playPosition = Just (ClipPos { sourceId = sourceId, clipId = clipId, offset = clipOffset }) }, Cmd.none )
+            else
+                ( model, Cmd.none )
 
         Just _ ->
-            model
+            ( model, Cmd.none )
 
 
 dragIsSmall : Drag -> Bool
@@ -429,8 +510,8 @@ clickFromDrag model drag =
             Nothing ->
                 NoOp
 
-            Just src ->
-                (PlaySource src (toFloat drag.start.x))
+            Just s ->
+                (PlaySource s (toFloat drag.start.x))
 
 
 scheduledUses : Model -> List ( Int, Clip, Source )
@@ -520,7 +601,7 @@ unusedClipRect yVal ( clip, source ) =
         , (line
             [ x1 (toString (clip.length / 2))
             , y1 (toString (yVal + 5))
-            , x2 (toString (clip.start + clip.length / 2))
+            , x2 (toString (clip.sourceStart + clip.length / 2))
             , y2 (toString (source.yPos + 5))
             , strokeWidth "0.2"
             , stroke "black"
@@ -603,6 +684,17 @@ sourcePlayPosition playPos source =
                 Just data.offset
             else
                 Nothing
+
+        Just (ClipPos clipPosData) ->
+            case List.head (List.filter (\c -> c.id == clipPosData.clipId) source.clips) of
+                Nothing ->
+                    Nothing
+
+                Just clip ->
+                    if clipPosData.sourceId == source.id then
+                        Just (clipPosData.offset + clip.sourceStart)
+                    else
+                        Nothing
 
         Just _ ->
             Nothing
@@ -741,7 +833,7 @@ clipWithResizeControls yVal clip =
             [ fill "green"
             , stroke "black"
             , strokeWidth ".2"
-            , x (toString clip.start)
+            , x (toString clip.sourceStart)
             , y (toString yVal)
             , width (toString clip.length)
             , height "10"
@@ -752,7 +844,7 @@ clipWithResizeControls yVal clip =
           )
         , (rect
             [ fill "darkgreen"
-            , x (toString clip.start)
+            , x (toString clip.sourceStart)
             , y (toString (yVal - 3))
             , width "3"
             , height "5"
@@ -763,7 +855,7 @@ clipWithResizeControls yVal clip =
           )
         , (rect
             [ fill "darkgreen"
-            , x (toString (clip.start + clip.length))
+            , x (toString (clip.sourceStart + clip.length))
             , y (toString (yVal + 7))
             , width "3"
             , height "5"
@@ -781,7 +873,7 @@ shadow yVal clip =
     (rect
         [ fill "gray"
         , opacity "0.5"
-        , x (toString clip.start)
+        , x (toString clip.sourceStart)
         , y (toString yVal)
         , width (toString clip.length)
         , height "10"
