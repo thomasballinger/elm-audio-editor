@@ -53,6 +53,7 @@ type Msg
     | WinSize Window.Size
     | NoOp
     | AudioLengthKnown String String Float
+    | AudioOffsetUpdate String String Float
     | Schedule Int
     | UnSchedule Int
     | PlaySource Source Float
@@ -363,6 +364,14 @@ update msg model =
             , Cmd.none
             )
 
+        AudioOffsetUpdate url elClass offset ->
+            case List.head (model.sources |> List.filter (\src -> src.url == url)) of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just source ->
+                    ( updatePlayPos source offset model, Cmd.none )
+
         Schedule clipId ->
             ( scheduleClipAtEnd clipId model, Cmd.none )
 
@@ -376,6 +385,22 @@ update msg model =
               }
             , playAt ( source.elementClass, dxToDuration model offset )
             )
+
+
+updatePlayPos : Source -> Float -> Model -> Model
+updatePlayPos source offset model =
+    case model.playPosition of
+        Nothing ->
+            model
+
+        Just (SourcePos { sourceId }) ->
+            if source.id == sourceId then
+                { model | playPosition = Just (SourcePos { sourceId = sourceId, offset = offset }) }
+            else
+                model
+
+        Just _ ->
+            model
 
 
 dragIsSmall : Drag -> Bool
@@ -613,6 +638,15 @@ onLoadedMetadata msg =
     Html.Events.on "loadedmetadata" (Json.map msg targetDuration)
 
 
+targetCurrentTime : Json.Decoder Float
+targetCurrentTime =
+    Json.at [ "target", "currentTime" ] Json.float
+
+
+onTimeUpdate msg =
+    Html.Events.on "timeupdate" (Json.map msg targetCurrentTime)
+
+
 audioEmbed i url =
     let
         cls =
@@ -621,6 +655,7 @@ audioEmbed i url =
         Html.audio
             [ src url
             , onLoadedMetadata (AudioLengthKnown url cls)
+            , onTimeUpdate (AudioOffsetUpdate url cls)
             , class cls
             ]
             []
@@ -679,13 +714,14 @@ sourceView source sourcePos =
                 [ text source.url ]
            )
          ]
+            ++ (List.map (clipWithResizeControls source.yPos) source.clips)
             ++ (case sourcePos of
                     Nothing ->
                         []
 
                     Just offset ->
                         [ rect
-                            [ fill "green"
+                            [ fill "red"
                             , x (toString offset)
                             , y (toString source.yPos)
                             , width "1"
@@ -694,7 +730,6 @@ sourceView source sourcePos =
                             []
                         ]
                )
-            ++ (List.map (clipWithResizeControls source.yPos) source.clips)
         )
     )
 
