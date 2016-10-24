@@ -1,4 +1,7 @@
 
+body {
+  margin: 0;
+}
 text {
   pointer-events: none;
   user-select: none;

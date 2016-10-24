@@ -372,7 +372,7 @@ update msg model =
         PlaySource source offset ->
             ( { model
                 | playStatus = Playing
-                , playPosition = Just (SourcePos { sourceId = source.id, offset = offset })
+                , playPosition = Just (SourcePos { sourceId = source.id, offset = dxToDuration model offset })
               }
             , playAt ( source.elementClass, dxToDuration model offset )
             )
@@ -567,6 +567,22 @@ scheduledClipsView yVal uses =
     )
 
 
+sourcePlayPosition : Maybe PlayPosition -> Source -> Maybe Float
+sourcePlayPosition playPos source =
+    case playPos of
+        Nothing ->
+            Nothing
+
+        Just (SourcePos data) ->
+            if data.sourceId == source.id then
+                Just data.offset
+            else
+                Nothing
+
+        Just _ ->
+            Nothing
+
+
 view model =
     Html.div []
         ([ svg
@@ -575,7 +591,7 @@ view model =
             , y "0"
             , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
             ]
-            ((List.map sourceView model.sources)
+            ((List.map (\source -> sourceView source (sourcePlayPosition model.playPosition source)) model.sources)
                 ++ (dragGuides model)
                 ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
                 ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
@@ -641,8 +657,8 @@ dragGuides model =
                             |> List.map (\( clip, source ) -> (shadow source.yPos clip))
 
 
-sourceView : Source -> Svg Msg
-sourceView source =
+sourceView : Source -> Maybe Float -> Svg Msg
+sourceView source sourcePos =
     (g []
         ([ (rect
                 [ fill "blue"
@@ -663,6 +679,21 @@ sourceView source =
                 [ text source.url ]
            )
          ]
+            ++ (case sourcePos of
+                    Nothing ->
+                        []
+
+                    Just offset ->
+                        [ rect
+                            [ fill "green"
+                            , x (toString offset)
+                            , y (toString source.yPos)
+                            , width "1"
+                            , height "10"
+                            ]
+                            []
+                        ]
+               )
             ++ (List.map (clipWithResizeControls source.yPos) source.clips)
         )
     )

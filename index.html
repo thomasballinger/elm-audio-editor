@@ -15,10 +15,13 @@
       if (audioEl.length !== 1){
         throw Error("Can't find audio element with class name: "+elementClass);
       }
-      toPause.forEach(function(x){x.pause();});
-      audioEl[0].currentTime = offset;
-      audioEl[0].play();
-      console.log(offset);
+      toPause.forEach(function(x){
+        x.pause()
+      });
+      audioEl.forEach(function(x){
+        x.currentTime = offset;
+        x.play();
+      });
     });
   </script>
 </body>
