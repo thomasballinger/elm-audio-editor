@@ -22,9 +22,8 @@ port playAt : ( String, Float ) -> Cmd msg
 port pause : Int -> Cmd msg
 
 
-main : Program Never
 main =
-    App.program
+    App.programWithFlags
         { init = init
         , view = view
         , update = update
@@ -65,17 +64,19 @@ type Msg
     | DeleteClip Int
 
 
-init =
+init : { urlBase : String } -> ( Model, Cmd Msg )
+init flags =
     ( { sources = []
       , sourceUrls = [ "audio1.ogg", "audio2.ogg", "audio3.ogg" ]
       , drag = Nothing
       , windowSize = ( 100, 100 )
+      , urlBase = flags.urlBase
       , viewboxWidth = 400.0
       , viewboxHeight = 200.0
       , playPosition = Nothing
       , playStatus = Paused
       }
-    , Task.perform (\_ -> NoOp) WinSize Window.size
+    , Cmd.batch [ Task.perform (\_ -> NoOp) WinSize Window.size ]
     )
 
 
@@ -94,11 +95,46 @@ type alias Model =
     , sourceUrls : List String
     , drag : Maybe Drag
     , windowSize : ( Int, Int )
+    , urlBase : String
     , viewboxWidth : Float
     , viewboxHeight : Float
     , playPosition : Maybe PlayPosition
     , playStatus : PlayStatus
     }
+
+
+remixSpec : Model -> String
+remixSpec model =
+    let
+        uses =
+            scheduledUses model
+
+        acc =
+            ( -1, [] )
+
+        ( _, body ) =
+            List.foldl
+                (\( _, clip, source ) ( prevSourceId, lines ) ->
+                    ( source.id
+                    , (lines
+                        ++ (if source.id /= prevSourceId then
+                                [ "url = \"" ++ model.urlBase ++ source.url ++ "\"" ]
+                            else
+                                []
+                           )
+                        ++ [ "play from " ++ (toClockTime clip.sourceStart) ++ " to " ++ (toClockTime (clip.sourceStart + clip.length)) ]
+                      )
+                    )
+                )
+                acc
+                uses
+    in
+        "remix version 0.1\n\n" ++ (String.join "\n" body)
+
+
+toClockTime : Float -> String
+toClockTime t =
+    "1:05:67.89"
 
 
 type PlayPosition
@@ -499,16 +535,16 @@ updatePlayPos source offset model =
                                     | playPosition = Nothing
                                     , playStatus = Paused
                                   }
-                                , pause 1
+                                , (pause 1)
                                 )
                             else
                                 ( { model | playPosition = Just (ClipPos { sourceId = sourceId, clipId = clipId, offset = clipOffset }) }, Cmd.none )
             else
                 ( { model
-                    | playPosition = Nothing
-                    , playStatus = Paused
+                    | playPosition = Just (SourcePos { sourceId = sourceId, offset = offset })
+                    , playStatus = Playing
                   }
-                , pause 1
+                , Cmd.none
                 )
 
         Just _ ->
@@ -734,21 +770,22 @@ sourcePlayPosition playPos source =
 
 view model =
     Html.div []
-        ([ svg
-            [ version "1.1"
-            , x "0"
-            , y "0"
-            , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
-            ]
-            ((List.map (\source -> sourceView source (sourcePlayPosition model.playPosition source)) model.sources)
-                ++ (dragGuides model)
-                ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
-                ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
-                        (scheduledUses model)
-                     )
-                   ]
-            )
-         ]
+        ([ Html.textarea [] [ text (remixSpec model) ] ]
+            ++ [ svg
+                    [ version "1.1"
+                    , x "0"
+                    , y "0"
+                    , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
+                    ]
+                    ((List.map (\source -> sourceView source (sourcePlayPosition model.playPosition source)) model.sources)
+                        ++ (dragGuides model)
+                        ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
+                        ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
+                                (scheduledUses model)
+                             )
+                           ]
+                    )
+               ]
             ++ List.indexedMap audioEmbed model.sourceUrls
         )
 
