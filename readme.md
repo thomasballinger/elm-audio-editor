@@ -16,8 +16,7 @@ but watch works fine until the dependencies get beyond what I know how to
 describe with a Makefile.
 
     watch make
-    watchexec --ignore bundle.js --ignore bundle.js.map make
-    # ignores shouldn't be necessary if makefile is good
+    watchexec make
 
 Requires a server that accespts range requests in dev, like
 
