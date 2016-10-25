@@ -134,7 +134,38 @@ remixSpec model =
 
 toClockTime : Float -> String
 toClockTime t =
-    "1:05:67.89"
+    let
+        whole =
+            round t
+
+        hours =
+            whole // (60 * 60)
+
+        minutes =
+            whole // (60) % 60
+
+        seconds =
+            whole % 60
+
+        hundreths =
+            floor (t * 100)
+    in
+        String.join ""
+            [ (if hours > 0 then
+                (toString whole) ++ ":"
+               else
+                ""
+              )
+            , (if hours > 0 then
+                (String.slice -3 -1 ("0" ++ (toString minutes) ++ "!"))
+               else
+                toString minutes
+              )
+            , ":"
+            , (String.slice -3 -1 ("0" ++ (toString seconds) ++ "!"))
+            , "."
+            , (String.slice -3 -1 ("0" ++ (toString hundreths) ++ "!"))
+            ]
 
 
 type PlayPosition
@@ -681,7 +712,7 @@ unusedClipRect yVal ( clip, source ) =
             , fontFamily "Verdana"
             , fontSize "4"
             ]
-            [ text (source.url ++ "   " ++ (floatToTime clip.length)) ]
+            [ text (source.url ++ "   " ++ (toClockTime clip.length)) ]
           )
         , (ReusableViews.deleteBoxView (clip.length + 2) yVal 2 2 (DeleteClip clip.id))
         ]
@@ -714,7 +745,7 @@ usedClipRect yOffset ( index, clip, source ) =
                 , fontFamily "Verdana"
                 , fontSize "4"
                 ]
-                [ text (source.url ++ "   " ++ (floatToTime clip.length)) ]
+                [ text (source.url ++ "   " ++ (toClockTime clip.length)) ]
               )
             ]
         )
