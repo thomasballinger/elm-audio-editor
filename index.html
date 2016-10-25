@@ -5,7 +5,7 @@
 <body>
   <script src="build.js"></script>
   <script>
-    var urlBase = window.location.protocol + '//'+ window.location.host + '/';
+    var urlBase = window.location.protocol + '//'+ window.location.host + window.location.pathname;
     var app = Elm.Main.fullscreen({urlBase: urlBase});
     app.ports.playAt.subscribe(function(stuff){
       elementClass = stuff[0]
