@@ -13,6 +13,7 @@ import Json.Decode as Json
 import Window
 import Task
 import String
+import ReusableViews
 
 
 port playAt : ( String, Float ) -> Cmd msg
@@ -61,6 +62,7 @@ type Msg
     | UnSchedule Int
     | PlaySource Source Float
     | PlayClip Clip Float
+    | DeleteClip Int
 
 
 init =
@@ -277,6 +279,22 @@ updateClips update sources =
         sources
 
 
+deleteClip : Int -> Model -> Model
+deleteClip clipId model =
+    { model
+        | sources =
+            List.map
+                (\source ->
+                    { source
+                        | clips =
+                            List.filter (\clip -> clip.id /= clipId)
+                                source.clips
+                    }
+                )
+                model.sources
+    }
+
+
 clipSource : Model -> Int -> Maybe Source
 clipSource model clipId =
     model.sources
@@ -411,7 +429,12 @@ update msg model =
         AudioOffsetUpdate url elClass offset ->
             case List.head (model.sources |> List.filter (\src -> src.url == url)) of
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( { model
+                        | playPosition = Nothing
+                        , playStatus = Paused
+                      }
+                    , pause 1
+                    )
 
                 Just source ->
                     updatePlayPos source offset model
@@ -421,6 +444,9 @@ update msg model =
 
         UnSchedule index ->
             ( unscheduleClip index model, Cmd.none )
+
+        DeleteClip clipId ->
+            ( deleteClip clipId model, Cmd.none )
 
         PlaySource source offset ->
             ( { model
@@ -461,7 +487,7 @@ updatePlayPos source offset model =
             if source.id == sourceId && List.member clipId (List.map .id source.clips) then
                 case clipById model clipId of
                     Nothing ->
-                        ( model, Cmd.none )
+                        Debug.crash "we just checked that it existed!"
 
                     Just clip ->
                         let
@@ -478,7 +504,12 @@ updatePlayPos source offset model =
                             else
                                 ( { model | playPosition = Just (ClipPos { sourceId = sourceId, clipId = clipId, offset = clipOffset }) }, Cmd.none )
             else
-                ( model, Cmd.none )
+                ( { model
+                    | playPosition = Nothing
+                    , playStatus = Paused
+                  }
+                , pause 1
+                )
 
         Just _ ->
             ( model, Cmd.none )
@@ -616,6 +647,7 @@ unusedClipRect yVal ( clip, source ) =
             ]
             [ text (source.url ++ "   " ++ (floatToTime clip.length)) ]
           )
+        , (ReusableViews.deleteBoxView (clip.length + 2) yVal 2 2 (DeleteClip clip.id))
         ]
     )
 
