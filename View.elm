@@ -14,10 +14,27 @@ import Util
 import RemixSpec
 
 
+type alias ScaleInfo =
+    { hScale : Float
+    , x : Float
+    , y : Float
+    }
+
+
+scale : Model -> ScaleInfo
+scale model =
+    (ScaleInfo (hScale model.zoom) 0 0)
+
+
+hScale : Int -> Float
+hScale zoom =
+    (toFloat zoom) * (2 ^ (toFloat zoom))
+
+
 view model =
     let
         s =
-            (ScaleInfo (hScale model.zoom) 0)
+            scale model
     in
         Html.div []
             ([ svg
@@ -27,17 +44,35 @@ view model =
                 , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
                 ]
                 ((List.indexedMap (\index source -> sourceView { s | y = (sourceYPos model source) } source (sourcePlayPosition model.playPosition source)) model.sources)
-                    ++ (dragGuides model)
-                    ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
-                    ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
+                    ++
+                        (dragGuides model)
+                    ++
+                        [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
+                    --++ [ (linesFromUnusedClipsToSourcesView)]
+                    ++
+                        [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
                             (scheduledUses model)
-                         )
-                       ]
+                          )
+                        ]
                 )
              ]
                 ++ List.indexedMap audioEmbed model.sourceUrls
                 ++ [ Html.textarea [] [ text (RemixSpec.remixSpec model) ] ]
             )
+
+
+linesFromUnusedClipsToSourcesView : List ( Float, Float ) -> List ( Float, Float ) -> Svg Msg
+linesFromUnusedClipsToSourcesView clipPositions sourcePositions =
+    (line
+        [ x1 (toString (10.0 / 2))
+        , y1 (toString (0 + 5))
+        , x2 (toString (10.0 + 10.0 / 2))
+        , y2 (toString (0 + 5))
+        , strokeWidth "0.2"
+        , stroke "black"
+        ]
+        []
+    )
 
 
 targetDuration : Json.Decoder Float
@@ -111,12 +146,6 @@ dragGuides model =
                         model.sources
                             |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
                             |> List.map (\( clip, source ) -> (shadow (sourceYPos model source) clip))
-
-
-type alias ScaleInfo =
-    { hScale : Float
-    , y : Float
-    }
 
 
 sourceView : ScaleInfo -> Source -> Maybe Float -> Svg Msg
@@ -230,16 +259,6 @@ unusedClipRect yVal ( clip, source ) =
             ]
             []
           )
-        , (line
-            [ x1 (toString (clip.length / 2))
-            , y1 (toString (yVal + 5))
-            , x2 (toString (clip.sourceStart + clip.length / 2))
-            , y2 (toString (0 + 5))
-            , strokeWidth "0.2"
-            , stroke "black"
-            ]
-            []
-          )
         , (text'
             [ x (toString (clip.length + 2))
             , y (toString (yVal + 6))
@@ -299,8 +318,3 @@ scheduledClipsView yVal uses =
     (g []
         (List.map (usedClipRect yVal) uses)
     )
-
-
-hScale : Int -> Float
-hScale zoom =
-    (toFloat zoom) * (2 ^ (toFloat zoom))
