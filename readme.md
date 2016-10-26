@@ -1,22 +1,16 @@
-![try it out](http://remixcast.com/editor/)
+[try it out](http://remixcast.com/editor/)
 
 ##TODO
 
+* zoom for more accurate clipping
 * preview mix
-* build list of jumps from clips
-* zoom
-* drag to change order
-* move selections to delete or something
-* save current setup OR maybe outputing a remix spec is enough?
+* drag to change order of clips
+* build from a remix spec
+* uploading files
 
 #Dev Setup
 
-There's a build process, run make. I use https://github.com/mattgreen/watchexec
-but watch works fine until the dependencies get beyond what I know how to
-describe with a Makefile.
-
     watch make
-    watchexec make
 
 Requires a server that accespts range requests in dev, like
 
