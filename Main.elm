@@ -1,6 +1,5 @@
 port module Main exposing (..)
 
-import AnimationFrame
 import Html.App as App
 import Svg exposing (..)
 import Svg.Attributes exposing (..)
@@ -13,7 +12,10 @@ import Json.Decode as Json
 import Window
 import Task
 import String
+import Keyboard
+import Char
 import ReusableViews
+import Util
 
 
 port playAt : ( String, Float ) -> Cmd msg
@@ -30,7 +32,9 @@ main =
         , subscriptions =
             \model ->
                 Sub.batch
-                    ([ Window.resizes WinSize ]
+                    ([ Window.resizes WinSize
+                     , Keyboard.presses Keypress
+                     ]
                         ++ case model.drag of
                             Nothing ->
                                 []
@@ -62,6 +66,7 @@ type Msg
     | PlaySource Source Float
     | PlayClip Clip Float
     | DeleteClip Int
+    | Keypress Keyboard.KeyCode
 
 
 init : { urlBase : String } -> ( Model, Cmd Msg )
@@ -71,10 +76,13 @@ init flags =
       , drag = Nothing
       , windowSize = ( 100, 100 )
       , urlBase = flags.urlBase
-      , viewboxWidth = 400.0
+      , viewboxWidth =
+            400.0
+            --TODO make these 1, then remove?
       , viewboxHeight = 200.0
       , playPosition = Nothing
       , playStatus = Paused
+      , zoom = 0
       }
     , Cmd.batch [ Task.perform (\_ -> NoOp) WinSize Window.size ]
     )
@@ -100,6 +108,7 @@ type alias Model =
     , viewboxHeight : Float
     , playPosition : Maybe PlayPosition
     , playStatus : PlayStatus
+    , zoom : Int
     }
 
 
@@ -185,7 +194,6 @@ type alias Source =
     , elementClass : String
     , length : Float
     , clips : List Clip
-    , yPos : Float
     }
 
 
@@ -487,7 +495,7 @@ update msg model =
         AudioLengthKnown url elClass length ->
             ( { model
                 | sources =
-                    (Source (nextId model) url elClass length [] (toFloat (List.length model.sources) * 15 + 10))
+                    (Source (nextId model) url elClass length [])
                         :: model.sources
               }
             , Cmd.none
@@ -515,6 +523,25 @@ update msg model =
         DeleteClip clipId ->
             ( deleteClip clipId model, Cmd.none )
 
+        Keypress code ->
+            ( case Char.fromCode code of
+                '=' ->
+                    { model | zoom = model.zoom + 1 }
+
+                '+' ->
+                    { model | zoom = model.zoom + 1 }
+
+                '-' ->
+                    { model | zoom = model.zoom - 1 }
+
+                '0' ->
+                    { model | zoom = 0 }
+
+                _ ->
+                    model
+            , Cmd.none
+            )
+
         PlaySource source offset ->
             ( { model
                 | playStatus = Playing
@@ -535,6 +562,11 @@ update msg model =
                       }
                     , playAt ( source.elementClass, clip.sourceStart + offset )
                     )
+
+
+hScale : Int -> Float
+hScale zoom =
+    (toFloat zoom) * (2 ^ (toFloat zoom))
 
 
 updatePlayPos : Source -> Float -> Model -> ( Model, Cmd Msg )
@@ -700,7 +732,7 @@ unusedClipRect yVal ( clip, source ) =
             [ x1 (toString (clip.length / 2))
             , y1 (toString (yVal + 5))
             , x2 (toString (clip.sourceStart + clip.length / 2))
-            , y2 (toString (source.yPos + 5))
+            , y2 (toString (0 + 5))
             , strokeWidth "0.2"
             , stroke "black"
             ]
@@ -800,25 +832,29 @@ sourcePlayPosition playPos source =
 
 
 view model =
-    Html.div []
-        ([ Html.textarea [] [ text (remixSpec model) ] ]
-            ++ [ svg
-                    [ version "1.1"
-                    , x "0"
-                    , y "0"
-                    , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
-                    ]
-                    ((List.map (\source -> sourceView source (sourcePlayPosition model.playPosition source)) model.sources)
-                        ++ (dragGuides model)
-                        ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
-                        ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
-                                (scheduledUses model)
-                             )
-                           ]
-                    )
-               ]
-            ++ List.indexedMap audioEmbed model.sourceUrls
-        )
+    let
+        s =
+            (ScaleInfo (hScale model.zoom) 0)
+    in
+        Html.div []
+            ([ svg
+                [ version "1.1"
+                , x "0"
+                , y "0"
+                , viewBox ("0 0 " ++ (toString model.viewboxWidth) ++ " " ++ (toString model.viewboxHeight))
+                ]
+                ((List.indexedMap (\index source -> sourceView { s | y = (sourceYPos model source) } source (sourcePlayPosition model.playPosition source)) model.sources)
+                    ++ (dragGuides model)
+                    ++ [ (unusedClipsView (toFloat (List.length model.sources) * 15 + 15) (unscheduledClips model)) ]
+                    ++ [ (scheduledClipsView (toFloat (List.length model.sources) * 15 + 15 + (toFloat (List.length (unscheduledClips model) * 15)))
+                            (scheduledUses model)
+                         )
+                       ]
+                )
+             ]
+                ++ List.indexedMap audioEmbed model.sourceUrls
+                ++ [ Html.textarea [] [ text (remixSpec model) ] ]
+            )
 
 
 targetDuration : Json.Decoder Float
@@ -853,6 +889,16 @@ audioEmbed i url =
             []
 
 
+sourceYPos : Model -> Source -> Float
+sourceYPos model source =
+    case Util.getIndex ((==) source) model.sources of
+        Nothing ->
+            Debug.crash "Don't know where to put nonexistant source"
+
+        Just index ->
+            toFloat (index * 15 + 10)
+
+
 dragGuides : Model -> List (Svg Msg)
 dragGuides model =
     let
@@ -861,7 +907,7 @@ dragGuides model =
                 (allClipsWithSources model)
                     |> List.filter (\( clip, source ) -> clip.id == clipId)
                     |> List.map (\( clip, source ) -> ( clipWithDrag model clip, source ))
-                    |> List.map (\( clip, source ) -> shadow source.yPos clip)
+                    |> List.map (\( clip, source ) -> shadow (sourceYPos model source) clip)
     in
         case model.drag of
             Nothing ->
@@ -881,16 +927,22 @@ dragGuides model =
                     NewClipDrag sourceId ->
                         model.sources
                             |> List.concatMap (\source -> (List.map (\clip -> ( clip, source )) (newClipsFromDrag model source)))
-                            |> List.map (\( clip, source ) -> (shadow source.yPos clip))
+                            |> List.map (\( clip, source ) -> (shadow (sourceYPos model source) clip))
 
 
-sourceView : Source -> Maybe Float -> Svg Msg
-sourceView source sourcePos =
+type alias ScaleInfo =
+    { hScale : Float
+    , y : Float
+    }
+
+
+sourceView : ScaleInfo -> Source -> Maybe Float -> Svg Msg
+sourceView s source sourcePos =
     (g []
         ([ (rect
                 [ fill "blue"
                 , x "0"
-                , y (toString source.yPos)
+                , y (toString s.y)
                 , width (toString source.length)
                 , height "10"
                 , Html.Events.on "mousedown" (Json.map (DragStart (\pos -> Drag (NewClipDrag source.id) pos pos)) Mouse.position)
@@ -899,14 +951,14 @@ sourceView source sourcePos =
            )
          , (text'
                 [ x "2"
-                , y (toString (source.yPos - 1))
+                , y (toString (s.y - 1))
                 , fontFamily "Verdana"
                 , fontSize "4"
                 ]
                 [ text source.url ]
            )
          ]
-            ++ (List.map (clipWithResizeControls source.yPos) source.clips)
+            ++ (List.map (clipWithResizeControls s.y) source.clips)
             ++ (case sourcePos of
                     Nothing ->
                         []
@@ -915,7 +967,7 @@ sourceView source sourcePos =
                         [ rect
                             [ fill "red"
                             , x (toString offset)
-                            , y (toString source.yPos)
+                            , y (toString s.y)
                             , width "1"
                             , height "10"
                             ]

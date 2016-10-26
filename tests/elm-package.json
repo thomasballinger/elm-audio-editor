@@ -1,0 +1,22 @@
+{
+    "version": "1.0.0",
+    "summary": "Tests for audio editor",
+    "repository": "https://github.com/thomasballinger/elm-audio-editor.git",
+    "license": "BSD3",
+    "source-directories": [
+        ".",
+        ".."
+    ],
+    "exposed-modules": [],
+    "dependencies": {
+        "elm-lang/core": "4.0.5 <= v < 5.0.0",
+        "elm-lang/html": "1.1.0 <= v < 2.0.0",
+        "elm-lang/keyboard": "1.0.0 <= v < 2.0.0",
+        "elm-lang/mouse": "1.0.0 <= v < 2.0.0",
+        "elm-lang/svg": "1.1.1 <= v < 2.0.0",
+        "elm-lang/window": "1.0.0 <= v < 2.0.0",
+        "elm-community/elm-test": "2.0.0 <= v < 3.0.0",
+        "rtfeldman/node-test-runner": "1.0.0 <= v < 2.0.0"
+    },
+    "elm-version": "0.17.0 <= v < 0.18.0"
+}
